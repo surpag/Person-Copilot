@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Chat</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f5f7;
+    display: flex; flex-direction: column;
+    height: 100vh;
+    color: #1d1d1f;
+  }
+  header {
+    background: #fff;
+    border-bottom: 1px solid #e5e5ea;
+    padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .meta { font-size: 12px; color: #86868b; }
+  header button {
+    background: #007aff; color: #fff; border: none;
+    padding: 6px 14px; border-radius: 6px;
+    font-size: 13px; cursor: pointer;
+  }
+  header button:hover { background: #0066d6; }
+
+  #chat {
+    flex: 1; overflow-y: auto;
+    padding: 20px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .msg { display: flex; gap: 10px; max-width: 900px; margin: 0 auto; width: 100%; }
+  .msg.user { flex-direction: row-reverse; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600;
+    flex-shrink: 0;
+  }
+  .msg.user .avatar { background: #007aff; color: #fff; }
+  .msg.assistant .avatar { background: #e5e5ea; color: #1d1d1f; }
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 12px;
+    max-width: 75%;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user .bubble { background: #007aff; color: #fff; }
+  .msg.assistant .bubble { background: #fff; border: 1px solid #e5e5ea; }
+
+  .reasoning {
+    font-size: 12px; color: #86868b;
+    font-style: italic;
+    padding: 4px 0;
+    display: none;
+  }
+  .reasoning.active { display: block; }
+
+  .cursor::after {
+    content: "▊"; animation: blink 1s infinite;
+    margin-left: 2px; color: #007aff;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  footer {
+    background: #fff; border-top: 1px solid #e5e5ea;
+    padding: 12px 20px;
+  }
+  .input-wrap {
+    max-width: 900px; margin: 0 auto;
+    display: flex; gap: 10px;
+  }
+  #input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid #d2d2d7; border-radius: 10px;
+    font-size: 14px; font-family: inherit;
+    resize: none; outline: none;
+    line-height: 1.5; max-height: 120px;
+  }
+  #input:focus { border-color: #007aff; }
+  #send {
+    padding: 0 20px;
+    background: #007aff; color: #fff; border: none;
+    border-radius: 10px; font-size: 14px; cursor: pointer;
+    font-weight: 500;
+  }
+  #send:disabled { background: #b0b0b5; cursor: not-allowed; }
+  #send:hover:not(:disabled) { background: #0066d6; }
+
+  .error {
+    color: #ff3b30; font-size: 13px;
+    text-align: center; padding: 4px;
+  }
+
+
+
+
+/* ========== Markdown 渲染样式 ========== */
+.bubble p { margin: 6px 0; }
+.bubble p:first-child { margin-top: 0; }
+.bubble p:last-child { margin-bottom: 0; }
+
+.bubble h1, .bubble h2, .bubble h3 {
+  margin: 12px 0 6px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.bubble h1 { font-size: 18px; }
+.bubble h2 { font-size: 16px; }
+.bubble h3 { font-size: 15px; }
+
+.bubble ul, .bubble ol { margin: 6px 0; padding-left: 22px; }
+.bubble li { margin: 3px 0; }
+
+.bubble code {
+  background: #f0f0f3;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: "Consolas", "Monaco", monospace;
+  font-size: 13px;
+}
+.bubble pre {
+  background: #f6f6f8;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 8px 0;
+  border: 1px solid #e5e5ea;
+}
+.bubble pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.bubble blockquote {
+  border-left: 3px solid #d2d2d7;
+  padding-left: 12px;
+  margin: 8px 0;
+  color: #6e6e73;
+}
+
+.bubble table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
+.bubble th, .bubble td {
+  border: 1px solid #d2d2d7;
+  padding: 6px 10px;
+  text-align: left;
+}
+.bubble th { background: #f6f6f8; font-weight: 600; }
+
+.bubble a { color: #007aff; text-decoration: none; }
+.bubble a:hover { text-decoration: underline; }
+
+.bubble hr { border: none; border-top: 1px solid #e5e5ea; margin: 12px 0; }
+
+/* 用户气泡不加 markdown 样式（用户消息就是纯文本） */
+.msg.user .bubble p { margin: 0; }  
+
+/* ========== 耗时标签 ========== */
+.elapsed {
+  font-size: 11px;
+  color: #86868b;
+  margin-top: 4px;
+  padding: 0 4px;
+  user-select: none;
+}
+.elapsed .sep { margin: 0 6px; opacity: 0.5; }
+
+#imagePreview {
+  position: relative;
+  margin-bottom: 8px;
+}
+#imagePreview img {
+  max-height: 100px;
+  border-radius: 8px;
+  border: 1px solid #d2d2d7;
+}
+
+#imagePreview .remove {
+  position: absolute;
+  top: -6px; right: -6px;
+  background: #ff3b30; color: white;
+  border-radius: 50%; width: 20px; height: 20px;
+  cursor: pointer; font-size: 12px;
+  display: flex; align-items: center; justify-content: center;
+  border: none;
+}
+
+/* ========== 聊天图片 ========== */
+.bubble .chat-img {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: 8px;
+  cursor: zoom-in;
+  display: block;
+  margin-bottom: 6px;
+  transition: opacity .15s;
+}
+.bubble .chat-img:hover { opacity: .9; }
+
+/* ========== Lightbox ========== */
+#lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.85);
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+#lightbox.active { display: flex; }
+#lightbox img {
+  max-width: 95vw;
+  max-height: 95vh;
+  object-fit: contain;
+  border-radius: 8px;
+}
+#lightbox .hint {
+  position: absolute;
+  bottom: 20px;
+  color: #fff;
+  font-size: 13px;
+  opacity: .7;
+}
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.0/dist/purify.min.js"></script>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Agent Chat</h1>
+    <div class="meta">会话: <span id="sessionId">-</span></div>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <select id="sessionSelect" style="padding:6px 10px;border:1px solid #d2d2d7;border-radius:6px;font-size:13px;max-width:260px;">
+      <option value="">— 选择会话 —</option>
+    </select>
+    <button onclick="newSession()">新会话</button>
+  </div>
+</header>
+<div id="chat"></div>
+<!-- 
+<footer>
+  <div class="input-wrap">
+    <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button id="send" onclick="send()">发送</button>
+  </div>
+</footer> -->
+<footer>
+  <div class="input-wrap">
+    <div id="imagePreview" style="display:none;"></div>
+   <label for="imageInput" title="超长图（高度 > 2000px）建议分段上传"
+       style="cursor:pointer;font-size:20px;padding:0 8px;display:flex;align-items:center;">📎</label>
+<input type="file" id="imageInput" accept="image/*" style="display:none;">
+    <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button id="send" onclick="send()">发送</button>
+  </div>
+</footer>
+<div id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="" alt="">
+  <div class="hint">点击任意处关闭</div>
+</div>
+
+
+<script>
+const API = "";  // 同源，留空
+const CHAT_EL = document.getElementById("chat");
+const INPUT_EL = document.getElementById("input");
+const SEND_EL = document.getElementById("send");
+const META_EL = document.getElementById("sessionId");
+
+let sessionId = localStorage.getItem("agent_session_id") || genSessionId();
+localStorage.setItem("agent_session_id", sessionId);
+META_EL.textContent = sessionId;
+
+let busy = false;
+let pendingImage = null;   // { base64: string, dataUrl: string }
+
+const IMG_INPUT = document.getElementById("imageInput");
+const IMG_PREVIEW = document.getElementById("imagePreview");
+
+IMG_INPUT.addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) {
+    alert("图片不能超过 5MB");
+    return;
+  }
+  const dataUrl = await new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+  // 去掉 "data:image/png;base64," 前缀
+  const parts = dataUrl.split(",");
+  const mime = parts[0].match(/data:(.*?);/)?.[1] || "image/png";
+  const base64 = parts[1];
+  pendingImage = { base64, dataUrl, mime };
+  IMG_PREVIEW.style.display = "block";
+  IMG_PREVIEW.innerHTML = `
+    <img src="${dataUrl}" />
+    <button class="remove" onclick="clearImage()">×</button>
+  `;
+  IMG_INPUT.value = "";  // 允许重复选同一文件
+});
+
+function clearImage() {
+  pendingImage = null;
+  IMG_PREVIEW.style.display = "none";
+  IMG_PREVIEW.innerHTML = "";
+}
+
+
+const SELECT_EL = document.getElementById("sessionSelect");
+
+function openLightbox(src) {
+  const lb = document.getElementById("lightbox");
+  document.getElementById("lightboxImg").src = src;
+  lb.classList.add("active");
+}
+function closeLightbox() {
+  document.getElementById("lightbox").classList.remove("active");
+}
+// ESC 关闭
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeLightbox();
+});
+// 事件委托：任何 .bubble 里的图都能点开
+document.addEventListener("click", (e) => {
+  if (e.target.tagName === "IMG" && e.target.closest(".bubble")) {
+    openLightbox(e.target.src);
+  }
+});
+
+async function loadSessionList() {
+  try {
+    const r = await fetch(API + "/sessions");
+    if (!r.ok) return;
+    const list = await r.json();
+    SELECT_EL.innerHTML = '<option value="">— 选择会话 —</option>';
+    list.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s.session_id;
+      opt.textContent = `${s.session_id}  (${s.updated_at.slice(5, 16)})`;
+      if (s.session_id === sessionId) opt.selected = true;
+      SELECT_EL.appendChild(opt);
+    });
+  } catch (e) {
+    console.error("加载会话列表失败", e);
+  }
+}
+// 切换会话
+SELECT_EL.addEventListener("change", async () => {
+  const sid = SELECT_EL.value;
+  if (!sid) return;
+  sessionId = sid;
+  localStorage.setItem("agent_session_id", sessionId);
+  META_EL.textContent = sessionId;
+  await loadHistory(sid);
+});
+
+async function loadHistory(sid) {
+  CHAT_EL.innerHTML = "";
+  try {
+    const r = await fetch(API + `/sessions/${encodeURIComponent(sid)}/history`);
+    if (!r.ok) return;
+    const data = await r.json();
+
+    let prevArchived = null;
+
+    data.messages.forEach(m => {
+      const isArchived = !!m.archived;
+
+      // 状态切换时插入分隔线
+      if (prevArchived !== null && prevArchived !== isArchived) {
+        const sep = document.createElement("div");
+        sep.className = "history-divider";
+        sep.textContent = isArchived ? "📦 以下为压缩历史" : "✨ 以下为活跃对话";
+        CHAT_EL.appendChild(sep);
+      }
+      if (prevArchived === null && isArchived) {
+        const sep = document.createElement("div");
+        sep.className = "history-divider";
+        sep.textContent = "📦 以下为压缩历史";
+        CHAT_EL.appendChild(sep);
+      }
+      prevArchived = isArchived;
+
+      const role = m.role === "user" ? "user" : "assistant";
+      const { wrap, bubble } = addMsg(role);
+
+      if (role === "assistant") {
+        bubble.innerHTML = DOMPurify.sanitize(marked.parse(m.content));
+        // 耗时渲染
+        if (m.elapsed_ms != null) {
+          const meta = document.createElement("div");
+          meta.className = "elapsed";
+          let html = `⏱ ${formatMs(m.elapsed_ms)}`;
+          if (m.ttft_ms != null) {
+            html += `<span class="sep">·</span>首字 ${formatMs(m.ttft_ms)}`;
+          }
+          meta.innerHTML = html;
+          wrap.appendChild(meta);
+        }
+      } else {
+        let html = "";
+        if (m.image_path) {
+          html += `<img src="/uploads/${m.image_path}" class="chat-img" alt="用户上传的图片">`;
+        }
+        if (m.content) {
+          html += `<span>${escapeHtml(m.content)}</span>`;
+        }
+        bubble.innerHTML = html;
+      }
+
+      if (isArchived) {
+        bubble.style.opacity = "0.6";
+        bubble.style.borderStyle = "dashed";
+        bubble.title = "此消息已进入压缩历史，不再参与 AI 上下文";
+      }
+    });
+  } catch (e) {
+    console.error("加载历史失败", e);
+  }
+}
+function genSessionId() {
+  return "web-" + Math.random().toString(36).slice(2, 10);
+}
+function formatMs(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;",
+    '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+async function newSession() {
+  sessionId = genSessionId();
+  localStorage.setItem("agent_session_id", sessionId);
+  META_EL.textContent = sessionId;
+  CHAT_EL.innerHTML = "";
+  await loadSessionList();
+  SELECT_EL.value = sessionId;
+}
+function addMsg(role, text = "") {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  wrap.innerHTML = `
+    <div class="avatar">${role === "user" ? "你" : "AI"}</div>
+    <div class="bubble"></div>
+  `;
+  const bubble = wrap.querySelector(".bubble");
+  if (text) bubble.textContent = text;
+  CHAT_EL.appendChild(wrap);
+  CHAT_EL.scrollTop = CHAT_EL.scrollHeight;
+  return { wrap, bubble };
+}
+
+async function send() {
+  const text = INPUT_EL.value.trim();
+  if (!text && !pendingImage) return;   // ← 允许"只发图不写字"
+
+
+  busy = true;
+  SEND_EL.disabled = true;
+  INPUT_EL.value = "";
+  INPUT_EL.style.height = "auto";
+
+  const { bubble: userBubble } = addMsg("user");
+  if (pendingImage) {
+    const img = document.createElement("img");
+    img.src = pendingImage.dataUrl;
+    img.className = "chat-img";
+    img.alt = "用户上传的图片";
+    userBubble.appendChild(img);
+  }
+  if (text) {
+    const span = document.createElement("span");
+    span.textContent = text;
+    userBubble.appendChild(span);
+  }
+  
+  const { wrap: aiWrap, bubble: aiBubble } = addMsg("assistant");
+  aiBubble.classList.add("cursor");
+
+  // reasoning 显示（可选）
+  const reasoning = document.createElement("div");
+  reasoning.className = "reasoning";
+  aiWrap.insertBefore(reasoning, aiBubble);
+
+  try {
+    const resp = await fetch(API + "/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: sessionId,
+        message: text,
+        image_base64: pendingImage ? pendingImage.base64 : null,
+        image_mime: pendingImage ? pendingImage.mime : null,
+      }),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let reasoningChars = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE 按 \n\n 分帧
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+
+        if (!raw.startsWith("data: ")) continue;
+        const jsonStr = raw.slice(6);
+        let evt;
+        try { evt = JSON.parse(jsonStr); } catch { continue; }
+
+        if (evt.kind === "content") {
+          aiBubble.textContent += evt.text;
+          CHAT_EL.scrollTop = CHAT_EL.scrollHeight;
+        } else if(evt.kind == "status") {
+            reasoning.textContent = evt.text;
+            reasoning.classList.add("active");
+        } else if (evt.kind === "reasoning") {
+          reasoningChars += evt.text.length;
+          reasoning.textContent = `思考中… ${reasoningChars} 字`;
+          reasoning.classList.add("active");
+          CHAT_EL.scrollTop = CHAT_EL.scrollHeight;
+        } else if (evt.kind === "done") {
+          reasoning.classList.remove("active");
+          const finalText = aiBubble.textContent || evt.reply || "";
+          aiBubble.innerHTML = DOMPurify.sanitize(marked.parse(finalText));
+
+          // 渲染耗时
+          const elapsed = evt.elapsed_ms;
+          const ttft = evt.ttft_ms;
+          if (elapsed != null) {
+            const meta = document.createElement("div");
+            meta.className = "elapsed";
+            let html = `⏱ ${formatMs(elapsed)}`;
+            if (ttft != null) {
+              html += `<span class="sep">·</span>首字 ${formatMs(ttft)}`;
+                }
+            meta.innerHTML = html;
+            aiBubble.parentElement.appendChild(meta);
+        }
+        CHAT_EL.scrollTop = CHAT_EL.scrollHeight;
+
+        } else if (evt.kind === "error") {
+          aiBubble.textContent = "";
+          aiBubble.innerHTML = `<span class="error">❌ ${evt.error}</span>`;
+        }
+      }
+    }
+  } catch (e) {
+    aiBubble.textContent = "";
+    aiBubble.innerHTML = `<span class="error">❌ ${e.message}</span>`;
+   } finally {
+    aiBubble.classList.remove("cursor");
+    busy = false;
+    SEND_EL.disabled = false;
+    INPUT_EL.focus();
+    // ← 新增：静默刷新会话列表（更新 updated_at 时间戳）
+    loadSessionList().catch(() => {});
+  }
+}
+
+// Enter 发送，Shift+Enter 换行
+INPUT_EL.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+// 自适应高度
+INPUT_EL.addEventListener("input", () => {
+  INPUT_EL.style.height = "auto";
+  INPUT_EL.style.height = Math.min(INPUT_EL.scrollHeight, 120) + "px";
+});
+// 初始化：加载会话列表 + 恢复当前会话历史
+(async () => {
+  await loadSessionList();
+  if (sessionId) {
+    await loadHistory(sessionId);
+  }
+})();
+// marked 配置
+marked.setOptions({
+  breaks: true,        // 单个换行 = <br>，符合聊天场景
+  gfm: true,           // GitHub 风格（表格、删除线、任务列表）
+  headerIds: false,    // 不生成锚点 ID（避免多次渲染 ID 冲突）
+  mangle: false,       // 不混淆邮箱
+});
+INPUT_EL.focus();
+</script>
+
+
+</body>
+</html>

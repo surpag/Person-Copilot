@@ -1,0 +1,27 @@
+@"
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 环境变量（含密钥）
+.env
+
+# 私钥（绝不应提交）
+*.pem
+backend/agent/keys/
+
+# 数据（含用户数据）
+data/
+traces/
+*.db
+*.db-journal
+
+# 一次性脚本
+check_*.py
+
+# IDE
+.vscode/
+.idea/
+"@ | Out-File -Encoding utf8 .gitignore
