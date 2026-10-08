@@ -1,15 +1,17 @@
-# è¿è¡Œæ—¶ä¾èµ–
+# ÔËĞĞÊ±ÒÀÀµ
 openai
 httpx
 python-dotenv
 aiosqlite
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
 PyJWT
+cryptography
 tavily-python
+python-multipart
 
-# æµ‹è¯•ä¾èµ–
+# ²âÊÔÒÀÀµ£¨Éú²ú²»ĞèÒª£¬±£Áô·½±ã±¾µØÅÜ£©
 pytest
 pytest-asyncio
 pytest-mock
