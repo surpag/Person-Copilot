@@ -1,4 +1,4 @@
-# 运行时依赖
+# Runtime dependencies
 openai
 httpx
 python-dotenv
@@ -11,7 +11,7 @@ cryptography
 tavily-python
 python-multipart
 
-# 测试依赖（生产不需要，保留方便本地跑）
+# Test dependencies
 pytest
 pytest-asyncio
 pytest-mock
