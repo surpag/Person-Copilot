@@ -2,7 +2,7 @@
 
 每个 Agent 独立 DB 连接，独立历史。同一 session 的请求串行。
 """
-
+import os
 import asyncio
 import logging
 from typing import Any
@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_SYSTEM_PROMPT = "你是一个聊天助手，可以使用工具帮助用户解决问题。"
-DEFAULT_DB_PATH = "agent_memory.db"
+_data_dir = os.getenv("DATA_DIR", "")
+DEFAULT_DB_PATH = (
+    os.path.join(_data_dir, "agent_memory.db") if _data_dir else "agent_memory.db"
+)
 
 
 class AgentPool:

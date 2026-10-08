@@ -45,8 +45,9 @@ from api.schemas import ChatRequest, ChatResponse, HealthResponse
 from api.vision import describe_image
 
 # ─── 图片存储配置 ───
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]  # 项目根目录
-_UPLOAD_DIR = _PROJECT_ROOT / "data" / "uploads"
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_DATA_DIR = Path(os.getenv("DATA_DIR", str(_PROJECT_ROOT / "data")))
+_UPLOAD_DIR = _DATA_DIR / "uploads"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
