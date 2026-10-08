@@ -1,3 +1,15 @@
+# 运行时依赖
+openai
+httpx
+python-dotenv
+aiosqlite
+fastapi
+uvicorn
+pydantic
+PyJWT
+tavily-python
+
+# 测试依赖
 pytest
 pytest-asyncio
 pytest-mock

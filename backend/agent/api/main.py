@@ -38,6 +38,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
+from pydantic import BaseModel
 from api.auth import require_token
 from api.pool import pool, DEFAULT_DB_PATH
 from api.schemas import ChatRequest, ChatResponse, HealthResponse
@@ -194,10 +195,15 @@ async def chat_stream(req: ChatRequest):
             )
             image_description = description
 
+            # 累积已生成内容（供中断时保存）
+        partial_content = {"text": ""}
+
         def on_token(text: str, kind: str) -> None:
             nonlocal ttft_ms
             if ttft_ms is None:
                 ttft_ms = (time.perf_counter() - started) * 1000
+            if kind == "content":
+                partial_content["text"] += text
             queue.put_nowait({"kind": kind, "text": text})
 
         old_on_token = agent.on_token
@@ -209,7 +215,6 @@ async def chat_stream(req: ChatRequest):
                 elapsed_ms = (time.perf_counter() - started) * 1000
                 ttft_final = round(ttft_ms) if ttft_ms is not None else None
 
-                # ← 新增：把耗时写进 DB
                 try:
                     await agent.store.update_last_assistant_metrics(
                         req.session_id,
@@ -227,6 +232,37 @@ async def chat_stream(req: ChatRequest):
                         "ttft_ms": ttft_final,
                     }
                 )
+            except asyncio.CancelledError:
+                # ─── 用户主动中断 ───
+                logger.info(f"[api] 用户中断 session={req.session_id}")
+                partial = partial_content["text"].strip()
+                if partial:
+                    try:
+                        await asyncio.shield(
+                            agent.store.append(
+                                req.session_id,
+                                {
+                                    "role": "assistant",
+                                    "content": partial,
+                                    "interrupted": 1,
+                                },
+                            )
+                        )
+                    except Exception as e:
+                        logger.error(f"[api] 中断内容保存失败: {e}")
+
+                try:
+                    await queue.put(
+                        {
+                            "kind": "interrupted",
+                            "partial": partial,
+                        }
+                    )
+                except Exception:
+                    pass
+
+                raise  # 让上层知道被取消
+
             except Exception as e:
                 logger.exception("[api] stream 失败")
                 await queue.put(
@@ -236,17 +272,28 @@ async def chat_stream(req: ChatRequest):
                     }
                 )
             finally:
-                await queue.put(None)
+                try:
+                    await queue.put(None)
+                except Exception:
+                    pass
 
         try:
             async with lock:
                 task = asyncio.create_task(run_chat())
-                while True:
-                    item = await queue.get()
-                    if item is None:
-                        break
-                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-                await task
+                pool.register_task(req.session_id, task)
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            break
+                        yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                    # 等待任务完成；被取消是预期行为
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass  # 忽略：前端会收到 interrupted 事件
+                finally:
+                    pool.clear_task(req.session_id)
         finally:
             agent.on_token = old_on_token
 
@@ -316,7 +363,7 @@ async def get_history(
             rows = conn.execute(
                 "SELECT * FROM ("
                 "  SELECT id, role, content, image_path, elapsed_ms, ttft_ms, "
-                "         archived, created_at "
+                "         archived, interrupted, created_at "
                 "  FROM messages "
                 "  WHERE session_id = ? AND id < ? "
                 "    AND role IN ('user', 'assistant') "
@@ -329,7 +376,7 @@ async def get_history(
             rows = conn.execute(
                 "SELECT * FROM ("
                 "  SELECT id, role, content, image_path, elapsed_ms, ttft_ms, "
-                "         archived, created_at "
+                "         archived, interrupted, created_at "
                 "  FROM messages "
                 "  WHERE session_id = ? "
                 "    AND role IN ('user', 'assistant') "
@@ -346,3 +393,15 @@ async def get_history(
         "messages": [dict(r) for r in rows],
         "has_more": len(rows) == limit,
     }
+
+
+class CancelRequest(BaseModel):
+    session_id: str
+
+
+@app.post("/chat/cancel", dependencies=[Depends(require_token)])
+async def cancel_chat(req: CancelRequest):
+    """取消指定 session 的运行中对话。"""
+    cancelled = pool.cancel_task(req.session_id)
+    logger.info(f"[api] cancel session={req.session_id} result={cancelled}")
+    return {"cancelled": cancelled, "session_id": req.session_id}

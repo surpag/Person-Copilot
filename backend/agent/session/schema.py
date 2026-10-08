@@ -31,6 +31,7 @@ _SCHEMA = [
         image_path    TEXT,
         elapsed_ms    INTEGER,
         ttft_ms       INTEGER,
+        interrupted   INTEGER NOT NULL DEFAULT 0,
         created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (session_id) REFERENCES sessions(session_id)
     )
@@ -79,6 +80,19 @@ async def _migrate_messages_add_archived(db: aiosqlite.Connection) -> None:
         await db.commit()
 
 
+async def _migrate_messages_add_interrupted(db: aiosqlite.Connection) -> None:
+    """给已存在的 messages 表补 interrupted 字段。"""
+    cursor = await db.execute("PRAGMA table_info(messages)")
+    cols = [row[1] for row in await cursor.fetchall()]
+    await cursor.close()
+
+    if "interrupted" not in cols:
+        await db.execute(
+            "ALTER TABLE messages ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0"
+        )
+        await db.commit()
+
+
 async def _migrate_messages_add_metrics(db: aiosqlite.Connection) -> None:
     """给已存在的 messages 表补 elapsed_ms / ttft_ms 字段。"""
     cursor = await db.execute("PRAGMA table_info(messages)")
@@ -102,4 +116,5 @@ async def connect(db_path: str = "agent_memory.db") -> aiosqlite.Connection:
     await _migrate_messages_add_image_path(db)
     await _migrate_messages_add_archived(db)
     await _migrate_messages_add_metrics(db)
+    await _migrate_messages_add_interrupted(db)
     return db

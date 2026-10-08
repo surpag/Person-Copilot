@@ -1,7 +1,6 @@
 import os
 import json
 import asyncio
-import datetime
 import logging
 import time
 import httpx
@@ -86,54 +85,6 @@ REQUEST_TIMEOUT_S = 120  # 主调用：实测最慢约 70s，留 ~1.7 倍余量
 SUMMARY_TIMEOUT_S = 60  # 摘要调用：正常 8-25s，超时就当失败并降级
 
 
-def _tool(name: str, description: str, properties: dict, required: list[str]) -> dict:
-    return {
-        "type": "function",
-        "function": {
-            "name": name,
-            "description": description,
-            "parameters": {
-                "type": "object",
-                "properties": properties or {},
-                "required": required or [],
-            },
-        },
-    }
-
-
-def tool_definitions() -> list[dict]:
-    return [
-        _tool(
-            "get_current_time",
-            "获取当前的系统时间。当用户询问现在几点、今天几号时使用。",
-            None,
-            None,
-        ),
-        # 新增天气调用工具
-        _tool(
-            "get_weather",
-            "获取当前城市的天气",
-            {"city": {"type": "string", "description": "城市名称"}},
-            ["city"],
-        ),
-    ]
-
-
-def get_current_time():
-    """本地真正执行的函数"""
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def get_weather(city: str):
-    weather_data = {"南京": "晴", "上海": "雨天", "北京": "多云"}
-    # 根据传入的 city 查找，找不到就返回默认提示
-    return weather_data.get(city, f"抱歉，暂时没有{city}的天气信息")
-
-
-# 工具名到函数的映射字典，方便后面通过名字直接调用
-available_tools = {"get_current_time": get_current_time, "get_weather": get_weather}
-
-
 def _estimate_tokens(messages: list[dict]) -> int:
     total = 0
     for m in messages:
@@ -142,36 +93,6 @@ def _estimate_tokens(messages: list[dict]) -> int:
         if m.get("tool_calls"):
             total += len(json.dumps(m["tool_calls"])) // 4
     return total
-
-
-# 新增
-# 模块级缓存（工具定义在启动后基本不变）
-# _TOOL_DEF_TOKENS_CACHE: int | None = None
-
-
-# def _get_tool_def_tokens() -> int:
-#     """计算工具定义占用的 token 数（带缓存）。"""
-#     global _TOOL_DEF_TOKENS_CACHE
-#     if _TOOL_DEF_TOKENS_CACHE is None:
-#         tools = get_tool_definitions()
-#         tools_json = json.dumps(tools, ensure_ascii=False)
-#         # JSON Schema 结构密集，token 密度比普通文本高，用 /3 更接近实际
-#         _TOOL_DEF_TOKENS_CACHE = len(tools_json) // 3
-#     return _TOOL_DEF_TOKENS_CACHE
-
-
-# def _estimate_tokens_full(messages: list[dict]) -> int:
-#     """
-#     完整 token 估算：messages + 工具定义 + 保守系数。
-
-#     为什么需要保守系数：
-#     - _estimate_tokens 用 len(content) // 2 估算中文，
-#       但实际 tokenizer 对中文约 1.5 字符/token，会低估
-#     - system prompt 里的结构化内容（列表、emoji）token 密度也高于普通文本
-#     """
-#     msg_tokens = _estimate_tokens(messages)
-#     tool_tokens = _get_tool_def_tokens()
-#     return int((msg_tokens + tool_tokens) * 1.5)
 
 
 def _split_into_turns(messages: list[dict]) -> list[list[dict]]:
@@ -243,12 +164,9 @@ class Agent:
         self.model = os.getenv("LLM_MODEL_ID")
         self.messages = [{"role": "system", "content": system_prompt}]
         self.max_steps = 5
-        self.SUMMARY_MAX_RETRIES = 3
         self.KEEP_RECENT_TOKENS = 1200  # 保留最近多少 token 不压缩
         self.KEEP_RECENT_TURNS = 10  # 保留最近多少个完整 turn 不压缩
         self.SUMMARY_MAX_TOKENS = 500  # 摘要本身最大输出
-        self.KEEP_RECENT_TOKENS = 1200
-        self.MAX_ACTIVE_TOKENS = 3000
         self.session_id = session_id or str(uuid.uuid4())
         self.store: SessionStore | None = None  # 等 init() 里赋
         self._prefs: PreferencesStore | None = None  # ← 新增
@@ -615,18 +533,8 @@ class Agent:
             tool_choice="auto",
             stream=True,
             stream_options={"include_usage": True},
-            # extra_body={"enable_thinking": False},
         )
         async for chunk in stream:
-            # ─── 临时诊断 ───
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            # reasoning_field = getattr(delta, "reasoning_content", None)
-            # if reasoning_field and len(reasoning_field) > 0:
-            #     logger.warning(
-            #         f"[DIAG] 发现 reasoning 字段！长度={len(reasoning_field)}"
-            #     )
             if getattr(chunk, "usage", None):
                 usage = chunk.usage
             if not chunk.choices:
@@ -667,25 +575,6 @@ class Agent:
 
         content = "".join(content_parts)
         tool_calls = [tool_parts[i] for i in sorted(tool_parts)] or None
-
-        # ─── 临时诊断：抓 LLM 响应构成 ───
-        logger.warning(
-            f"[DIAG] LLM#step{step} "
-            f"content={len(content)} 字 "
-            f"reasoning={reasoning_chars} 字 "
-            f"tool_calls={len(tool_calls) if tool_calls else 0} 个"
-        )
-        if tool_calls:
-            for tc in tool_calls:
-                args_preview = tc["function"]["arguments"][:300]
-                logger.warning(
-                    f"[DIAG]   tool={tc['function']['name']} "
-                    f"args_len={len(tc['function']['arguments'])} "
-                    f"args={args_preview}"
-                )
-        if content:
-            logger.warning(f"[DIAG]   content_preview={content[:200]}")
-        # ─── 诊断结束 ───
 
         if usage:
             step.metadata["total_tokens"] = usage.total_tokens
@@ -874,12 +763,6 @@ async def main():
         on_token=on_token,
     )
     await agent.init()
-    print(f"[DEBUG] QWEATHER_API_HOST = {os.getenv('QWEATHER_API_HOST')!r}")
-    print(f"[DEBUG] QWEATHER_PROJECT_ID = {os.getenv('QWEATHER_PROJECT_ID')!r}")
-    print(f"[DEBUG] QWEATHER_KEY_ID = {os.getenv('QWEATHER_KEY_ID')!r}")
-    print(
-        f"[DEBUG] QWEATHER_PRIVATE_KEY_PATH = {os.getenv('QWEATHER_PRIVATE_KEY_PATH')!r}"
-    )
     try:
         while True:
             try:

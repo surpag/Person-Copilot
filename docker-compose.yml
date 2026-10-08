@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  agent:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # 挂载数据目录，确保 SQLite 数据库和上传的图片不丢失
+      - ./data:/app/data
+      # 挂载密钥文件
+      - ./backend/agent/keys:/app/backend/agent/keys
+    env_file:
+      - .env
+    restart: unless-stopped

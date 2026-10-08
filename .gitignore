@@ -21,6 +21,7 @@ traces/
 # 一次性脚本
 check_*.py
 
+.workbuddy/
 # IDE
 .vscode/
 .idea/

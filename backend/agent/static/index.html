@@ -274,6 +274,7 @@
 <input type="file" id="imageInput" accept="image/*" style="display:none;">
     <textarea id="input" rows="1" placeholder="输入消息…（Enter 发送，Shift+Enter 换行）"></textarea>
     <button id="send" onclick="send()">发送</button>
+    <button id="stop" onclick="stopGeneration()" style="display:none;background:#ff3b30;">停止</button>
   </div>
 </footer>
 <div id="lightbox" onclick="closeLightbox()">
@@ -294,6 +295,35 @@ localStorage.setItem("agent_session_id", sessionId);
 META_EL.textContent = sessionId;
 
 let busy = false;
+let currentAbort = null;
+const STOP_EL = document.getElementById("stop");
+
+async function stopGeneration() {
+  // 1. 先发 cancel 请求（关键：在 abort 之前）
+  const cancelPromise = fetch(API + "/chat/cancel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  }).catch((e) => console.error("取消失败:", e));
+
+  // 2. 等 300ms，让 cancel 请求先到后端
+  await new Promise((r) => setTimeout(r, 300));
+
+  // 3. 再 abort 前端 fetch
+  if (currentAbort) {
+    currentAbort.abort();
+    currentAbort = null;
+  }
+
+  // 4. 等 cancel 完成
+  await cancelPromise;
+
+  // 5. UI 恢复
+  STOP_EL.style.display = "none";
+  SEND_EL.style.display = "block";
+  SEND_EL.disabled = false;
+  busy = false;
+}
 let pendingImage = null;   // { base64: string, dataUrl: string }
 
 const IMG_INPUT = document.getElementById("imageInput");
@@ -411,6 +441,13 @@ async function loadHistory(sid) {
 
       if (role === "assistant") {
         bubble.innerHTML = DOMPurify.sanitize(marked.parse(m.content));
+        // 中断标记
+        if (m.interrupted) {
+          const tip = document.createElement("div");
+          tip.style.cssText = "color:#86868b;font-size:12px;margin-top:6px;";
+          tip.textContent = "（已中断）";
+          bubble.appendChild(tip);
+        }
         // 耗时渲染
         if (m.elapsed_ms != null) {
           const meta = document.createElement("div");
@@ -485,6 +522,9 @@ async function send() {
 
   busy = true;
   SEND_EL.disabled = true;
+  SEND_EL.style.display = "none";
+  STOP_EL.style.display = "block";
+  currentAbort = new AbortController();
   INPUT_EL.value = "";
   INPUT_EL.style.height = "auto";
 
@@ -520,6 +560,7 @@ async function send() {
         image_base64: pendingImage ? pendingImage.base64 : null,
         image_mime: pendingImage ? pendingImage.mime : null,
       }),
+        signal: currentAbort.signal, 
     });
 
     if (!resp.ok) {
@@ -578,6 +619,18 @@ async function send() {
         }
         CHAT_EL.scrollTop = CHAT_EL.scrollHeight;
 
+               } else if (evt.kind === "interrupted") {
+          reasoning.classList.remove("active");
+          aiBubble.classList.remove("cursor");
+          // 保留已生成内容，加"（已中断）"标记
+          const partialText = aiBubble.textContent || evt.partial || "";
+          if (partialText) {
+            aiBubble.innerHTML = DOMPurify.sanitize(marked.parse(partialText));
+            const tip = document.createElement("div");
+            tip.style.cssText = "color:#86868b;font-size:12px;margin-top:6px;";
+            tip.textContent = "（已中断）";
+            aiBubble.appendChild(tip);
+          }
         } else if (evt.kind === "error") {
           aiBubble.textContent = "";
           aiBubble.innerHTML = `<span class="error">❌ ${evt.error}</span>`;
@@ -585,14 +638,21 @@ async function send() {
       }
     }
   } catch (e) {
-    aiBubble.textContent = "";
-    aiBubble.innerHTML = `<span class="error">❌ ${e.message}</span>`;
-   } finally {
+    if (e.name === "AbortError") {
+      // 用户主动停止，UI 由 interrupted 事件处理
+      console.log("生成已中断");
+    } else {
+      aiBubble.textContent = "";
+      aiBubble.innerHTML = `<span class="error">❌ ${e.message}</span>`;
+    }
+  } finally {
     aiBubble.classList.remove("cursor");
     busy = false;
+    currentAbort = null;
     SEND_EL.disabled = false;
+    SEND_EL.style.display = "block";
+    STOP_EL.style.display = "none";
     INPUT_EL.focus();
-    // ← 新增：静默刷新会话列表（更新 updated_at 时间戳）
     loadSessionList().catch(() => {});
   }
 }

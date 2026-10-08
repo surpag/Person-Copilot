@@ -91,14 +91,17 @@ class SessionStore:
 
     # ---------- 消息级别 ----------python d:\agent\agent-learn\backend\agent\run.py
     async def append(self, session_id: str, message: dict[str, Any]) -> None:
-        """追加一条消息。message 是标准 OpenAI 格式的 dict。"""
+        """追加一条消息。"""
         tool_calls = message.get("tool_calls")
         image_path = message.get("image_path")
+        interrupted = message.get("interrupted", 0)
+
         await self._db.execute(
             """
             INSERT INTO messages
-                (session_id, role, content, tool_calls, tool_call_id,image_path)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (session_id, role, content, tool_calls, tool_call_id,
+                 image_path, interrupted)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -107,9 +110,9 @@ class SessionStore:
                 json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None,
                 message.get("tool_call_id"),
                 image_path,
+                interrupted,
             ),
         )
-        # 顺带更新会话的 updated_at
         await self._db.execute(
             "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
             (session_id,),
@@ -169,7 +172,7 @@ class SessionStore:
         cursor = await self._db.execute(
             """
         SELECT role, content, tool_calls, tool_call_id, image_path,
-               elapsed_ms, ttft_ms
+               elapsed_ms, ttft_ms, interrupted
         FROM messages
         WHERE session_id = ? AND archived = 0 AND role != 'system'
         ORDER BY id
@@ -191,6 +194,8 @@ class SessionStore:
                 msg["elapsed_ms"] = row["elapsed_ms"]
             if row["ttft_ms"] is not None:
                 msg["ttft_ms"] = row["ttft_ms"]
+            if row["interrupted"]:
+                msg["interrupted"] = 1
             result.append(msg)
 
         return result
