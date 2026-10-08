@@ -107,12 +107,20 @@ async def _migrate_messages_add_metrics(db: aiosqlite.Connection) -> None:
 
 
 async def connect(db_path: str = "agent_memory.db") -> aiosqlite.Connection:
-    """打开数据库、启用 Row 工厂、初始化表结构。"""
     db = await aiosqlite.connect(db_path)
-    db.row_factory = aiosqlite.Row  # 关键：让 row 支持 row["column"]
+    db.row_factory = aiosqlite.Row
+
+    # 1. 建基础表（sessions / messages / 索引）
+    for stmt in _SCHEMA:
+        await db.execute(stmt)
+
+    # 2. 建附加表（summaries 等）
     for stmt in _STATEMENTS:
         await db.execute(stmt)
+
     await db.commit()
+
+    # 3. 跑 migration（此时表已建好）
     await _migrate_messages_add_image_path(db)
     await _migrate_messages_add_archived(db)
     await _migrate_messages_add_metrics(db)
