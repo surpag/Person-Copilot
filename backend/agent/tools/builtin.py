@@ -22,9 +22,9 @@ DEFAULT_API_HOST = "https://devapi.qweather.com"
 _jwt_cache: dict = {"token": None, "exp": 0}
 
 
-def _generate_jwt(project_id: str, key_id: str, private_key_path: str) -> str:
+def _generate_jwt(project_id: str, key_id: str) -> str:
     """用 Ed25519 私钥签发 JWT。"""
-    private_key = Path(private_key_path).read_text(encoding="utf-8")
+    private_key = _load_private_key()
     now = int(time.time())
     developer_id = os.getenv("QWEATHER_DEVELOPER_ID", "")
     if not developer_id:
@@ -37,7 +37,27 @@ def _generate_jwt(project_id: str, key_id: str, private_key_path: str) -> str:
     }
     headers = {"kid": key_id}
     return jwt.encode(payload, private_key, algorithm="EdDSA", headers=headers)
+def _load_private_key() -> str:
+    """
+    按优先级加载天气私钥。
+    1. 环境变量 QWEATHER_PRIVATE_KEY_CONTENT（云部署）
+    2. 文件 QWEATHER_PRIVATE_KEY_PATH（本地）
+    """
+    content = os.getenv("QWEATHER_PRIVATE_KEY_CONTENT", "")
+    if content:
+        # 支持 \n 转义（环境变量单行）和真实换行两种写法
+        return content.replace("\\n", "\n")
 
+    path_str = os.getenv("QWEATHER_PRIVATE_KEY_PATH", "")
+    if not path_str:
+        raise RuntimeError(
+            "天气私钥未配置：需设置 QWEATHER_PRIVATE_KEY_CONTENT 或 "
+            "QWEATHER_PRIVATE_KEY_PATH"
+        )
+    if not Path(path_str).exists():
+        raise RuntimeError(f"天气私钥文件不存在：{path_str}")
+    with open(path_str, "r", encoding="utf-8") as f:
+        return f.read()
 
 def _get_jwt_token() -> str:
     """带缓存地获取 JWT，过期前 60s 自动续签。"""
@@ -47,20 +67,17 @@ def _get_jwt_token() -> str:
 
     project_id = os.getenv("QWEATHER_PROJECT_ID", "")
     key_id = os.getenv("QWEATHER_KEY_ID", "")
-    private_key_path = os.getenv("QWEATHER_PRIVATE_KEY_PATH", "")
 
-    if not all([project_id, key_id, private_key_path]):
+    if not all([project_id, key_id]):
         raise RuntimeError(
-            "天气服务未配置：需要 QWEATHER_PROJECT_ID / QWEATHER_KEY_ID / QWEATHER_PRIVATE_KEY_PATH"
+            "天气服务未配置：需要 QWEATHER_PROJECT_ID / QWEATHER_KEY_ID"
         )
-    if not Path(private_key_path).exists():
-        raise RuntimeError(f"天气服务未配置：私钥文件不存在 {private_key_path}")
+    # 不再检查 private_key_path —— _load_private_key 会按优先级自己选来源
 
-    token = _generate_jwt(project_id, key_id, private_key_path)
+    token = _generate_jwt(project_id, key_id)   # ← 只传 2 个参数
     _jwt_cache["token"] = token
     _jwt_cache["exp"] = now + 900
     return token
-
 
 def _get_weather_config() -> tuple[str, str]:
     """返回 (api_host, jwt_token)。"""
