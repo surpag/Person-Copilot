@@ -1,7 +1,7 @@
 """待办 CRUD。
 
 数据模型：
-    todos(id INTEGER PK, content, due, status, created_at, completed_at, session_id)
+    todos(id INTEGER PK, user_id, content, due, status, created_at, completed_at, session_id)
 
 状态机：
     pending --complete()--> done
@@ -9,7 +9,6 @@
 
 due 格式：ISO 8601（YYYY-MM-DD 或 YYYY-MM-DDTHH:MM）
 """
-
 from datetime import datetime
 from typing import Any
 
@@ -25,6 +24,7 @@ class TodosStore:
     # ---------- 写 ----------
     async def add(
         self,
+        user_id: int,
         content: str,
         due: str | None = None,
         category: str = "work",
@@ -42,15 +42,15 @@ class TodosStore:
 
         cursor = await self._db.execute(
             """
-            INSERT INTO todos (content, due, category, lifetime, session_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO todos (user_id, content, due, category, lifetime, session_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (content, due, category, lifetime, session_id),
+            (user_id, content, due, category, lifetime, session_id),
         )
         await self._db.commit()
         return int(cursor.lastrowid)
 
-    async def complete(self, todo_id: int) -> bool:
+    async def complete(self, user_id: int, todo_id: int) -> bool:
         """
         标记完成。返回 True 表示本次生效，False 表示不存在。
         幂等：已完成的待办再次 complete 返回 True（不报错）。
@@ -59,26 +59,30 @@ class TodosStore:
             """
             UPDATE todos
             SET status = 'done', completed_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+            WHERE user_id = ? AND id = ?
             """,
-            (todo_id,),
+            (user_id, todo_id),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def delete(self, todo_id: int) -> bool:
-        cursor = await self._db.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+    async def delete(self, user_id: int, todo_id: int) -> bool:
+        cursor = await self._db.execute(
+            "DELETE FROM todos WHERE user_id = ? AND id = ?", (user_id, todo_id)
+        )
         await self._db.commit()
         return cursor.rowcount > 0
 
     # ---------- 读 ----------
-    async def get(self, todo_id: int) -> dict[str, Any] | None:
-        cursor = await self._db.execute("SELECT * FROM todos WHERE id = ?", (todo_id,))
+    async def get(self, user_id: int, todo_id: int) -> dict[str, Any] | None:
+        cursor = await self._db.execute(
+            "SELECT * FROM todos WHERE user_id = ? AND id = ?", (user_id, todo_id)
+        )
         row = await cursor.fetchone()
         await cursor.close()
         return dict(row) if row else None
 
-    async def list(self, status: str | None = "pending") -> list[dict[str, Any]]:
+    async def list(self, user_id: int, status: str | None = "pending") -> list[dict[str, Any]]:
         """
         status=None 表示列全部；否则只列指定状态。
         排序：pending 优先按 due（NULL 排最后），再按 id DESC。
@@ -89,35 +93,39 @@ class TodosStore:
         if status is None:
             sql = """
                 SELECT * FROM todos
+                WHERE user_id = ?
                 ORDER BY
                     CASE WHEN due IS NULL THEN 1 ELSE 0 END,
                     due ASC,
                     id DESC
             """
-            cursor = await self._db.execute(sql)
+            cursor = await self._db.execute(sql, (user_id,))
         else:
             sql = """
                 SELECT * FROM todos
-                WHERE status = ?
+                WHERE user_id = ? AND status = ?
                 ORDER BY
                     CASE WHEN due IS NULL THEN 1 ELSE 0 END,
                     due ASC,
                     id DESC
             """
-            cursor = await self._db.execute(sql, (status,))
+            cursor = await self._db.execute(sql, (user_id, status))
 
         rows = await cursor.fetchall()
         await cursor.close()
         return [dict(r) for r in rows]
 
-    async def count(self, status: str | None = None) -> int:
+    async def count(self, user_id: int, status: str | None = None) -> int:
         if status is None:
-            cursor = await self._db.execute("SELECT COUNT(*) AS n FROM todos")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) AS n FROM todos WHERE user_id = ?", (user_id,)
+            )
         else:
             if status not in VALID_STATUSES:
                 raise ValueError(f"无效状态 {status!r}")
             cursor = await self._db.execute(
-                "SELECT COUNT(*) AS n FROM todos WHERE status = ?", (status,)
+                "SELECT COUNT(*) AS n FROM todos WHERE user_id = ? AND status = ?",
+                (user_id, status),
             )
         row = await cursor.fetchone()
         await cursor.close()

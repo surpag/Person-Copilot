@@ -66,3 +66,19 @@ def set_last_user_content(text: str | None) -> None:
 
 def get_last_user_content() -> str | None:
     return _last_user_content.get()
+
+
+# ============================================================
+# 当前用户 ID（ContextVar，多用户数据隔离）
+# ============================================================
+
+_current_user_id: ContextVar[int] = ContextVar("current_user_id", default=0)
+
+
+def set_current_user_id(user_id: int) -> None:
+    """记录当前执行链路的用户 ID（工具函数用它做数据隔离）。"""
+    _current_user_id.set(user_id)
+
+
+def get_current_user_id() -> int:
+    return _current_user_id.get()

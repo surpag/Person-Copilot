@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · Copilot</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f5f7;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    background: #fff; border-radius: 20px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.06);
+    width: 100%; max-width: 400px;
+    padding: 40px 32px;
+  }
+  h1 { font-size: 22px; margin-bottom: 8px; text-align: center; }
+  .subtitle { font-size: 13px; color: #86868b; text-align: center; margin-bottom: 28px; }
+  .tabs { display: flex; margin-bottom: 24px; border-bottom: 1px solid #e5e5ea; }
+  .tab {
+    flex: 1; padding: 10px 0; text-align: center;
+    font-size: 14px; color: #86868b; cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: #007aff; border-bottom-color: #007aff; font-weight: 500; }
+  label { display: block; font-size: 13px; color: #86868b; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 12px 14px;
+    border: 1px solid #d2d2d7; border-radius: 10px;
+    font-size: 15px; outline: none; font-family: inherit;
+  }
+  input:focus { border-color: #007aff; }
+  button {
+    width: 100%; padding: 12px 0; margin-top: 24px;
+    background: #007aff; color: #fff; border: none;
+    border-radius: 10px; font-size: 15px; font-weight: 500;
+    cursor: pointer;
+  }
+  button:disabled { background: #b0b0b5; }
+  .error { color: #ff3b30; font-size: 13px; margin-top: 12px; text-align: center; min-height: 20px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Copilot</h1>
+  <div class="subtitle">你的个人 AI 助理</div>
+
+  <div class="tabs">
+    <div class="tab active" data-mode="login">登录</div>
+    <div class="tab" data-mode="register">注册</div>
+  </div>
+
+  <form id="form">
+    <label>邮箱</label>
+    <input type="email" id="email" required autocomplete="email">
+
+    <label>密码</label>
+    <input type="password" id="password" required autocomplete="current-password">
+
+    <div id="register-only" class="hidden">
+      <label>昵称（可选）</label>
+      <input type="text" id="nickname">
+
+      <label>邀请码</label>
+      <input type="text" id="invite_code" style="text-transform:uppercase;" placeholder="8 位字母数字">
+    </div>
+
+    <button type="submit" id="submit-btn">登录</button>
+    <div class="error" id="error"></div>
+  </form>
+</div>
+
+<script>
+const API = "";
+let mode = "login";
+
+const TABS = document.querySelectorAll(".tab");
+const FORM = document.getElementById("form");
+const EMAIL = document.getElementById("email");
+const PASSWORD = document.getElementById("password");
+const NICKNAME = document.getElementById("nickname");
+const INVITE = document.getElementById("invite_code");
+const REG_ONLY = document.getElementById("register-only");
+const SUBMIT = document.getElementById("submit-btn");
+const ERROR = document.getElementById("error");
+
+TABS.forEach((t) => {
+  t.addEventListener("click", () => {
+    TABS.forEach((x) => x.classList.remove("active"));
+    t.classList.add("active");
+    mode = t.dataset.mode;
+    if (mode === "register") {
+      REG_ONLY.classList.remove("hidden");
+      SUBMIT.textContent = "注册";
+      PASSWORD.autocomplete = "new-password";
+    } else {
+      REG_ONLY.classList.add("hidden");
+      SUBMIT.textContent = "登录";
+      PASSWORD.autocomplete = "current-password";
+    }
+    ERROR.textContent = "";
+  });
+});
+
+FORM.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  ERROR.textContent = "";
+  SUBMIT.disabled = true;
+
+  const email = EMAIL.value.trim();
+  const password = PASSWORD.value;
+
+  try {
+    let r;
+    if (mode === "login") {
+      r = await fetch(API + "/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+    } else {
+      const invite_code = INVITE.value.trim().toUpperCase();
+      if (invite_code.length !== 8) {
+        throw new Error("邀请码应为 8 位");
+      }
+      r = await fetch(API + "/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email, password, invite_code,
+          nickname: NICKNAME.value.trim(),
+        }),
+      });
+    }
+
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+
+    localStorage.setItem("agent_jwt", data.token);
+    localStorage.setItem("agent_user", JSON.stringify(data.user));
+    window.location.href = "/";
+  } catch (err) {
+    ERROR.textContent = err.message;
+  } finally {
+    SUBMIT.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,9 +1,10 @@
 """用户偏好 / 事实的 CRUD。
 
 结构：
-    preferences(id, key, value, scope, category, lifetime, source, ...)
+    preferences(id, user_id, key, value, scope, category, lifetime, source, ...)
 
 关键概念：
+- user_id:  数据归属用户（多用户隔离）
 - scope:    user / agent         —— "关于我" 还是 "关于助手"
 - category: profile/work/...     —— 具体维度
 - lifetime: transient/mid_term/long_term —— 时效性
@@ -25,6 +26,7 @@ class PreferencesStore:
     # ---------- 写 ----------
     async def remember(
         self,
+        user_id: int,
         key: str,
         value: str,
         scope: str = "user",
@@ -50,24 +52,25 @@ class PreferencesStore:
         if source not in VALID_SOURCES:
             raise ValueError(f"source 必须是 {VALID_SOURCES} 之一")
 
-        existed = await self._exists(key, scope, category)
+        existed = await self._exists(user_id, key, scope, category)
         await self._db.execute(
             """
-            INSERT INTO preferences (key, value, scope, category, lifetime, source)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(key, scope, category) DO UPDATE SET
+            INSERT INTO preferences (user_id, key, value, scope, category, lifetime, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, key, scope, category) DO UPDATE SET
                 value      = excluded.value,
                 lifetime   = excluded.lifetime,
                 source     = excluded.source,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (key, value, scope, category, lifetime, source),
+            (user_id, key, value, scope, category, lifetime, source),
         )
         await self._db.commit()
         return not existed
 
     async def update(
         self,
+        user_id: int,
         pref_id: int,
         key: str | None = None,
         value: str | None = None,
@@ -97,70 +100,74 @@ class PreferencesStore:
             return False
 
         sets.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(user_id)
         values.append(pref_id)
 
         cursor = await self._db.execute(
-            f"UPDATE preferences SET {', '.join(sets)} WHERE id = ?",
+            f"UPDATE preferences SET {', '.join(sets)} WHERE user_id = ? AND id = ?",
             values,
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def forget(self, key: str, scope: str = "user", category: str = "profile") -> bool:
+    async def forget(self, user_id: int, key: str, scope: str = "user", category: str = "profile") -> bool:
         """按 key+scope+category 删除。"""
         cursor = await self._db.execute(
-            "DELETE FROM preferences WHERE key = ? AND scope = ? AND category = ?",
-            (key.strip(), scope, category),
+            "DELETE FROM preferences WHERE user_id = ? AND key = ? AND scope = ? AND category = ?",
+            (user_id, key.strip(), scope, category),
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def delete_by_id(self, pref_id: int) -> bool:
+    async def delete_by_id(self, user_id: int, pref_id: int) -> bool:
         cursor = await self._db.execute(
-            "DELETE FROM preferences WHERE id = ?", (pref_id,)
+            "DELETE FROM preferences WHERE user_id = ? AND id = ?", (user_id, pref_id)
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
     # ---------- 读 ----------
-    async def get(self, key: str, scope: str = "user", category: str = "profile") -> str | None:
+    async def get(self, user_id: int, key: str, scope: str = "user", category: str = "profile") -> str | None:
         cursor = await self._db.execute(
-            "SELECT value FROM preferences WHERE key = ? AND scope = ? AND category = ?",
-            (key, scope, category),
+            "SELECT value FROM preferences WHERE user_id = ? AND key = ? AND scope = ? AND category = ?",
+            (user_id, key, scope, category),
         )
         row = await cursor.fetchone()
         await cursor.close()
         return row["value"] if row else None
 
-    async def get_all(self) -> dict[str, str]:
+    async def get_all(self, user_id: int) -> dict[str, str]:
         """返回 {key: value}，只含 scope=user 的（用于注入 system prompt）。"""
         cursor = await self._db.execute(
-            "SELECT key, value FROM preferences WHERE scope = 'user' ORDER BY key"
+            "SELECT key, value FROM preferences WHERE user_id = ? AND scope = 'user' ORDER BY key",
+            (user_id,),
         )
         rows = await cursor.fetchall()
         await cursor.close()
         return {r["key"]: r["value"] for r in rows}
 
-    async def list_all(self) -> list[dict[str, Any]]:
-        """扁平列表（用于 CLI）。"""
+    async def list_all(self, user_id: int) -> list[dict[str, Any]]:
+        """扁平列表（用于 CLI / 前端）。"""
         cursor = await self._db.execute(
             """
             SELECT id, key, value, scope, category, lifetime, source,
                    created_at, updated_at
             FROM preferences
+            WHERE user_id = ?
             ORDER BY scope, category, updated_at DESC
-            """
+            """,
+            (user_id,),
         )
         rows = await cursor.fetchall()
         await cursor.close()
         return [dict(r) for r in rows]
 
-    async def list_grouped(self) -> dict[str, dict[str, list[dict]]]:
+    async def list_grouped(self, user_id: int) -> dict[str, dict[str, list[dict]]]:
         """
         返回 {scope: {category: [条目列表]}}。
         前端"记忆"页用它渲染。
         """
-        rows = await self.list_all()
+        rows = await self.list_all(user_id)
         grouped: dict[str, dict[str, list[dict]]] = {}
         for r in rows:
             scope = r["scope"] or "user"
@@ -168,22 +175,25 @@ class PreferencesStore:
             grouped.setdefault(scope, {}).setdefault(cat, []).append(r)
         return grouped
 
-    async def count(self, scope: str | None = None) -> int:
+    async def count(self, user_id: int, scope: str | None = None) -> int:
         if scope:
             cursor = await self._db.execute(
-                "SELECT COUNT(*) AS n FROM preferences WHERE scope = ?", (scope,)
+                "SELECT COUNT(*) AS n FROM preferences WHERE user_id = ? AND scope = ?",
+                (user_id, scope),
             )
         else:
-            cursor = await self._db.execute("SELECT COUNT(*) AS n FROM preferences")
+            cursor = await self._db.execute(
+                "SELECT COUNT(*) AS n FROM preferences WHERE user_id = ?", (user_id,)
+            )
         row = await cursor.fetchone()
         await cursor.close()
         return int(row["n"])
 
     # ---------- 内部 ----------
-    async def _exists(self, key: str, scope: str, category: str) -> bool:
+    async def _exists(self, user_id: int, key: str, scope: str, category: str) -> bool:
         cursor = await self._db.execute(
-            "SELECT 1 FROM preferences WHERE key = ? AND scope = ? AND category = ?",
-            (key, scope, category),
+            "SELECT 1 FROM preferences WHERE user_id = ? AND key = ? AND scope = ? AND category = ?",
+            (user_id, key, scope, category),
         )
         row = await cursor.fetchone()
         await cursor.close()

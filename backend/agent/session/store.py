@@ -9,29 +9,29 @@ class SessionStore:
     def __init__(self, db: aiosqlite.Connection) -> None:
         self._db = db
 
-    async def get_summary(self, session_id: str) -> str | None:
+    async def get_summary(self, user_id: int, session_id: str) -> str | None:
         cursor = await self._db.execute(
-            "SELECT content FROM summaries WHERE session_id = ?",
-            (session_id,),
+            "SELECT content FROM summaries WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         row = await cursor.fetchone()
         await cursor.close()
         return row["content"] if row else None
 
-    async def upsert_summary(self, session_id: str, content: str) -> None:
+    async def upsert_summary(self, user_id: int, session_id: str, content: str) -> None:
         await self._db.execute(
             """
-        INSERT INTO summaries (session_id, content)
-        VALUES (?, ?)
-        ON CONFLICT(session_id) DO UPDATE SET
+        INSERT INTO summaries (user_id, session_id, content)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_id, session_id) DO UPDATE SET
             content    = excluded.content,
             updated_at = CURRENT_TIMESTAMP
         """,
-            (session_id, content),
+            (user_id, session_id, content),
         )
         await self._db.commit()
 
-    async def archive_older_messages(self, session_id: str, keep_recent: int) -> int:
+    async def archive_older_messages(self, user_id: int, session_id: str, keep_recent: int) -> int:
         """
         归档除最近 keep_recent 条之外的所有未归档非 system 消息。
         返回被归档的数量。
@@ -43,15 +43,15 @@ class SessionStore:
             """
         UPDATE messages
         SET archived = 1
-        WHERE session_id = ? AND archived = 0 AND role != 'system'
+        WHERE user_id = ? AND session_id = ? AND archived = 0 AND role != 'system'
           AND id NOT IN (
               SELECT id FROM messages
-              WHERE session_id = ? AND archived = 0 AND role != 'system'
+              WHERE user_id = ? AND session_id = ? AND archived = 0 AND role != 'system'
               ORDER BY id DESC
               LIMIT ?
           )
             """,
-            (session_id, session_id, keep_recent),
+            (user_id, session_id, user_id, session_id, keep_recent),
         )
 
         count = cursor.rowcount
@@ -59,38 +59,41 @@ class SessionStore:
         return count
 
     # ---------- 会话级别 ----------
-    async def create_session(self, session_id: str, system_prompt: str) -> None:
+    async def create_session(self, user_id: int, session_id: str, system_prompt: str) -> None:
         """幂等地创建会话（存在则忽略）。"""
         await self._db.execute(
             """
-            INSERT OR IGNORE INTO sessions (session_id, system_prompt)
-            VALUES (?, ?)
+            INSERT OR IGNORE INTO sessions (user_id, session_id, system_prompt)
+            VALUES (?, ?, ?)
             """,
-            (session_id, system_prompt),
+            (user_id, session_id, system_prompt),
         )
         await self._db.commit()
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
+    async def list_sessions(self, user_id: int) -> list[dict[str, Any]]:
         cursor = await self._db.execute("""
             SELECT session_id, system_prompt, created_at, updated_at
             FROM sessions
+            WHERE user_id = ?
             ORDER BY updated_at DESC
-            """)
+            """, (user_id,))
         rows = await cursor.fetchall()
         await cursor.close()
         return [dict(r) for r in rows]
 
-    async def delete_session(self, session_id: str) -> None:
+    async def delete_session(self, user_id: int, session_id: str) -> None:
         await self._db.execute(
-            "DELETE FROM messages WHERE session_id = ?", (session_id,)
+            "DELETE FROM messages WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         await self._db.execute(
-            "DELETE FROM sessions WHERE session_id = ?", (session_id,)
+            "DELETE FROM sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         await self._db.commit()
 
-    # ---------- 消息级别 ----------python d:\agent\agent-learn\backend\agent\run.py
-    async def append(self, session_id: str, message: dict[str, Any]) -> None:
+    # ---------- 消息级别 ----------
+    async def append(self, user_id: int, session_id: str, message: dict[str, Any]) -> None:
         """追加一条消息。"""
         tool_calls = message.get("tool_calls")
         image_path = message.get("image_path")
@@ -99,11 +102,12 @@ class SessionStore:
         await self._db.execute(
             """
             INSERT INTO messages
-                (session_id, role, content, tool_calls, tool_call_id,
+                (user_id, session_id, role, content, tool_calls, tool_call_id,
                  image_path, interrupted)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                user_id,
                 session_id,
                 message.get("role", ""),
                 message.get("content") or "",
@@ -114,13 +118,14 @@ class SessionStore:
             ),
         )
         await self._db.execute(
-            "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE session_id = ?",
-            (session_id,),
+            "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         await self._db.commit()
 
     async def update_last_assistant_metrics(
         self,
+        user_id: int,
         session_id: str,
         elapsed_ms: int,
         ttft_ms: int | None,
@@ -135,15 +140,15 @@ class SessionStore:
             SET elapsed_ms = ?, ttft_ms = ?
             WHERE id = (
                 SELECT id FROM messages
-                WHERE session_id = ? AND role = 'assistant'
+                WHERE user_id = ? AND session_id = ? AND role = 'assistant'
                 ORDER BY id DESC LIMIT 1
             )
             """,
-            (elapsed_ms, ttft_ms, session_id),
+            (elapsed_ms, ttft_ms, user_id, session_id),
         )
         await self._db.commit()
 
-    async def load(self, session_id: str) -> list[dict[str, Any]]:
+    async def load(self, user_id: int, session_id: str) -> list[dict[str, Any]]:
         """
         加载顺序：[persona] → [摘要] → [活跃消息]
 
@@ -155,8 +160,8 @@ class SessionStore:
 
         # 1. persona
         cursor = await self._db.execute(
-            "SELECT system_prompt FROM sessions WHERE session_id = ?",
-            (session_id,),
+            "SELECT system_prompt FROM sessions WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         row = await cursor.fetchone()
         await cursor.close()
@@ -164,7 +169,7 @@ class SessionStore:
             result.append({"role": "system", "content": row["system_prompt"]})
 
         # 2. 摘要
-        summary = await self.get_summary(session_id)
+        summary = await self.get_summary(user_id, session_id)
         if summary:
             result.append({"role": "system", "content": f"{SUMMARY_TAG} {summary}"})
 
@@ -174,10 +179,10 @@ class SessionStore:
         SELECT role, content, tool_calls, tool_call_id, image_path,
                elapsed_ms, ttft_ms, interrupted
         FROM messages
-        WHERE session_id = ? AND archived = 0 AND role != 'system'
+        WHERE user_id = ? AND session_id = ? AND archived = 0 AND role != 'system'
         ORDER BY id
         """,
-            (session_id,),
+            (user_id, session_id),
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -200,10 +205,10 @@ class SessionStore:
 
         return result
 
-    async def count(self, session_id: str) -> int:
+    async def count(self, user_id: int, session_id: str) -> int:
         cursor = await self._db.execute(
-            "SELECT COUNT(*) AS n FROM messages WHERE session_id = ?",
-            (session_id,),
+            "SELECT COUNT(*) AS n FROM messages WHERE user_id = ? AND session_id = ?",
+            (user_id, session_id),
         )
         row = await cursor.fetchone()
         await cursor.close()

@@ -11,7 +11,7 @@
 
 from pydantic import BaseModel, Field
 
-from .context import get_context
+from .context import get_context, get_current_user_id
 from .registry import tool
 
 # ============================================================
@@ -33,6 +33,10 @@ def _get_todos():
     if todos is None:
         raise RuntimeError("todos store 未初始化。请先 set_context(todos=...)")
     return todos
+
+
+def _uid() -> int:
+    return get_current_user_id()
 
 
 # ============================================================
@@ -79,6 +83,7 @@ async def remember_preference(args: RememberPreferenceArgs) -> str:
     prefs = _get_prefs()
     try:
         created = await prefs.remember(
+            _uid(),
             args.key,
             args.value,
             scope=args.scope,
@@ -109,7 +114,7 @@ class ForgetPreferenceArgs(BaseModel):
 )
 async def forget_preference(args: ForgetPreferenceArgs) -> str:
     prefs = _get_prefs()
-    ok = await prefs.forget(args.key, scope=args.scope, category=args.category)
+    ok = await prefs.forget(_uid(), args.key, scope=args.scope, category=args.category)
     if not ok:
         return f"❌ 未找到 key={args.key} 的记录"
     return f"✅ 已忘记：{args.key}"
@@ -140,7 +145,7 @@ class AddTodoArgs(BaseModel):
 async def add_todo(args: AddTodoArgs) -> str:
     todos = _get_todos()
     try:
-        tid = await todos.add(args.content, due=args.due)
+        tid = await todos.add(_uid(), args.content, due=args.due)
     except ValueError as e:
         return f"❌ 参数错误：{e}"
     due_text = f"（截止：{args.due}）" if args.due else ""
@@ -159,7 +164,7 @@ async def list_todos(args: ListTodosArgs) -> str:
     todos = _get_todos()
     status = None if args.status == "all" else args.status
     try:
-        rows = await todos.list(status=status)
+        rows = await todos.list(_uid(), status=status)
     except ValueError as e:
         return f"❌ 参数错误：{e}"
     if not rows:
@@ -184,7 +189,7 @@ class CompleteTodoArgs(BaseModel):
 )
 async def complete_todo(args: CompleteTodoArgs) -> str:
     todos = _get_todos()
-    ok = await todos.complete(args.id)
+    ok = await todos.complete(_uid(), args.id)
     if not ok:
         return f"❌ 未找到 id={args.id} 的待办"
     return f"✅ 已完成待办 #{args.id}"
@@ -197,7 +202,7 @@ class DeleteTodoArgs(BaseModel):
 @tool(description=("删除一条待办。当用户说「删掉」「取消」「不用了」时使用。"))
 async def delete_todo(args: DeleteTodoArgs) -> str:
     todos = _get_todos()
-    ok = await todos.delete(args.id)
+    ok = await todos.delete(_uid(), args.id)
     if not ok:
         return f"❌ 未找到 id={args.id} 的待办"
     return f"✅ 已删除待办 #{args.id}"

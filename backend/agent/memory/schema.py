@@ -5,18 +5,20 @@
 - session 表：会话历史（可能被压缩/清理）
 - memory 表：跨会话的长期记忆（永不被压缩）
 
-两个 schema 可以用同一个 DB 文件，互不干扰。
+多用户隔离：所有表都以 user_id 作为第一隔离维度。
+内置任务（is_builtin=1）seed 到 user_id=0，作为全局模板，所有用户可见、不可删。
 """
-
 import os
 from typing import Final
 
 import aiosqlite
+
 _MEMORY_SCHEMA: Final[list[str]] = [
     # ─── preferences：key-value，带 scope + category + lifetime ───
     """
     CREATE TABLE IF NOT EXISTS preferences (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id     INTEGER NOT NULL DEFAULT 0,
         key         TEXT NOT NULL,
         value       TEXT NOT NULL,
         scope       TEXT NOT NULL DEFAULT 'user',
@@ -25,13 +27,14 @@ _MEMORY_SCHEMA: Final[list[str]] = [
         source      TEXT NOT NULL DEFAULT 'user',
         created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(key, scope, category)
+        UNIQUE(user_id, key, scope, category)
     )
     """,
     # ─── todos：带 category + lifetime ───
     """
     CREATE TABLE IF NOT EXISTS todos (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL DEFAULT 0,
         content      TEXT NOT NULL,
         due          TEXT,
         status       TEXT NOT NULL DEFAULT 'pending',
@@ -46,6 +49,7 @@ _MEMORY_SCHEMA: Final[list[str]] = [
     """
     CREATE TABLE IF NOT EXISTS notes (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL DEFAULT 0,
         session_id   TEXT,
         title        TEXT NOT NULL,
         content      TEXT NOT NULL,
@@ -57,10 +61,11 @@ _MEMORY_SCHEMA: Final[list[str]] = [
         updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
-       # ─── tasks：任务模板 ───
+    # ─── tasks：任务模板 ───
     """
     CREATE TABLE IF NOT EXISTS tasks (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL DEFAULT 0,
         name         TEXT NOT NULL,
         icon         TEXT NOT NULL DEFAULT '📋',
         description  TEXT NOT NULL DEFAULT '',
@@ -76,13 +81,14 @@ _MEMORY_SCHEMA: Final[list[str]] = [
         last_run_at  TEXT,
         created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(name)
+        UNIQUE(user_id, name)
     )
     """,
-        # ─── task_runs：任务执行记录 ───
+    # ─── task_runs：任务执行记录 ───
     """
     CREATE TABLE IF NOT EXISTS task_runs (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id      INTEGER NOT NULL DEFAULT 0,
         task_id      INTEGER NOT NULL,
         run_at       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         status       TEXT NOT NULL DEFAULT 'running',
@@ -113,36 +119,46 @@ async def init_tables(db: aiosqlite.Connection) -> None:
 
     # 4. migration 之后再建索引（依赖新字段）
     indexes = [
-        "CREATE INDEX IF NOT EXISTS idx_prefs_scope ON preferences(scope)",
-        "CREATE INDEX IF NOT EXISTS idx_prefs_category ON preferences(scope, category)",
+        "CREATE INDEX IF NOT EXISTS idx_prefs_user ON preferences(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_prefs_scope ON preferences(user_id, scope)",
+        "CREATE INDEX IF NOT EXISTS idx_prefs_category ON preferences(user_id, scope, category)",
         "CREATE INDEX IF NOT EXISTS idx_prefs_lifetime ON preferences(lifetime)",
-        "CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(status)",
+        "CREATE INDEX IF NOT EXISTS idx_todos_user ON todos(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_todos_status ON todos(user_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_todos_category ON todos(category)",
-        "CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(category)",
-        "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notes_category ON notes(user_id, category)",
+        "CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(user_id, updated_at DESC)",
     ]
     for idx in indexes:
         await db.execute(idx)
 
-          # 5. tasks 索引
+    # 5. tasks 索引
     await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(category, enabled)"
-    )
-        # 5.1 task_runs 索引
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, run_at DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id)"
     )
     await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_task_runs_run_at ON task_runs(run_at DESC)"
+        "CREATE INDEX IF NOT EXISTS idx_tasks_category ON tasks(user_id, category, enabled)"
     )
     await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, enabled)"
+        "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(user_id, status, enabled)"
+    )
+    # 5.1 task_runs 索引
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_runs_user ON task_runs(user_id)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(user_id, task_id, run_at DESC)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_task_runs_run_at ON task_runs(user_id, run_at DESC)"
     )
     await db.commit()
 
-    # 6. 预置任务（仅首次，用 INSERT OR IGNORE）
+    # 6. 预置内置任务（全局模板，user_id=0；INSERT OR IGNORE 幂等）
     await _seed_builtin_tasks(db)
     await db.commit()
+
 
 async def connect(db_path: str) -> aiosqlite.Connection:
     """
@@ -157,9 +173,11 @@ async def connect(db_path: str) -> aiosqlite.Connection:
     db.row_factory = aiosqlite.Row
     await init_tables(db)
     return db
+
+
 async def _drop_old_preferences_if_needed(db: aiosqlite.Connection) -> None:
     """检测 preferences 表是否是旧结构（没有 scope 列）。
-    
+
     如果是旧结构，直接 DROP——老数据丢弃（用户已同意）。
     """
     cursor = await db.execute(
@@ -226,7 +244,7 @@ async def _migrate_notes_add_category_lifetime(db: aiosqlite.Connection) -> None
     await db.commit()
 
 
-# 预置技能清单
+# 预置技能清单（全局模板，user_id=0）
 _BUILTIN_TASKS = [
     {
         "name": "今日优先清单",
@@ -278,15 +296,16 @@ _BUILTIN_TASKS = [
     },
 ]
 
+
 async def _seed_builtin_tasks(db: aiosqlite.Connection) -> None:
-    """预置内置任务。用 INSERT OR IGNORE 保证幂等。"""
+    """预置内置任务（user_id=0 全局模板）。用 INSERT OR IGNORE 保证幂等。"""
     for task in _BUILTIN_TASKS:
         await db.execute(
             """
             INSERT OR IGNORE INTO tasks
-                (name, icon, description, category, prompt, tools,
+                (user_id, name, icon, description, category, prompt, tools,
                  trigger_type, enabled, is_builtin)
-            VALUES (?, ?, ?, ?, ?, ?, 'manual', 1, 1)
+            VALUES (0, ?, ?, ?, ?, ?, ?, 'manual', 1, 1)
             """,
             (
                 task["name"],

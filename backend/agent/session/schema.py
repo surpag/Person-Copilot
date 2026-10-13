@@ -2,10 +2,12 @@
 会话持久化存储（SQLite + aiosqlite）。
 
 表结构：
-- sessions  ：会话元信息（session_id / system_prompt / 时间戳）
+- sessions  ：会话元信息（user_id + session_id 复合主键 / system_prompt / 时间戳）
 - messages  ：消息明细（按 id 递增，保证顺序）
-"""
+- summaries ：会话摘要（user_id + session_id 复合主键）
 
+多用户隔离：所有表都以 user_id 作为第一隔离维度。
+"""
 import json
 from typing import Any
 
@@ -14,41 +16,45 @@ import aiosqlite
 _SCHEMA = [
     """
     CREATE TABLE IF NOT EXISTS sessions (
-        session_id     TEXT PRIMARY KEY,
+        user_id        INTEGER NOT NULL,
+        session_id     TEXT NOT NULL,
         system_prompt  TEXT NOT NULL DEFAULT '',
         created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, session_id)
     )
     """,
     """
     CREATE TABLE IF NOT EXISTS messages (
         id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id       INTEGER NOT NULL,
         session_id    TEXT NOT NULL,
         role          TEXT NOT NULL,
         content       TEXT NOT NULL DEFAULT '',
         tool_calls    TEXT,
         tool_call_id  TEXT,
         image_path    TEXT,
+        archived      INTEGER NOT NULL DEFAULT 0,
         elapsed_ms    INTEGER,
         ttft_ms       INTEGER,
         interrupted   INTEGER NOT NULL DEFAULT 0,
-        created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+        created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_messages_session
-        ON messages(session_id, id)
+        ON messages(user_id, session_id, id)
     """,
 ]
 
 _STATEMENTS = [
-    # ... 现有的 sessions / messages / 索引 ...
     """
     CREATE TABLE IF NOT EXISTS summaries (
-        session_id  TEXT PRIMARY KEY,
+        user_id     INTEGER NOT NULL,
+        session_id  TEXT NOT NULL,
         content     TEXT NOT NULL,
-        updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, session_id)
     )
     """,
 ]

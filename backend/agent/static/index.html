@@ -1032,6 +1032,72 @@ body {
   font-weight: 500;
 }
 #task-create-send:disabled { background: #b0b0b5; cursor: not-allowed; }
+
+/* 设置页 */
+.settings-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e5ea;
+}
+.settings-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.settings-card-header button {
+  background: #007aff;
+  color: #fff;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.user-row img {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f0f0f3;
+}
+.user-row > div { flex: 1; }
+.user-row button {
+  background: transparent;
+  border: 1px solid #d2d2d7;
+  color: #1d1d1f;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-item {
+  padding: 12px 0;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f3;
+}
+.settings-item:last-child { border-bottom: none; }
+.logout-btn {
+  width: 100%;
+  padding: 14px;
+  background: #fff;
+  color: #ff3b30;
+  border: 1px solid #e5e5ea;
+  border-radius: 12px;
+  font-size: 15px;
+  cursor: pointer;
+  margin-top: 8px;
+}
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -1268,10 +1334,54 @@ body {
     <div class="placeholder">加载中…</div>
   </div>
 </section>
-    <!-- 设置页（占位） -->
+    <!-- 设置页 -->
     <section id="page-settings" class="page">
       <header class="page-header"><h1>设置</h1></header>
-      <div class="placeholder">⚙️ 设置 —— 开发中</div>
+      <div class="scroll-body">
+
+        <!-- 用户卡片 -->
+        <div class="settings-card">
+          <div class="user-row">
+            <img id="settings-avatar" src="/static/icon.svg" alt="头像" />
+            <div>
+              <div id="settings-nickname" style="font-size:16px;font-weight:600;"></div>
+              <div id="settings-email" style="font-size:12px;color:#86868b;"></div>
+            </div>
+            <button onclick="editNickname()">编辑</button>
+          </div>
+        </div>
+
+        <!-- 模型配置 -->
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div>模型配置</div>
+            <button onclick="openModelForm()">+ 添加</button>
+          </div>
+          <div id="model-configs-list"></div>
+        </div>
+
+        <!-- 用量 -->
+        <div class="settings-card">
+          <div class="settings-card-header"><div>用量（近 30 天）</div></div>
+          <div id="stats-content">加载中…</div>
+        </div>
+
+        <!-- 账号 -->
+        <div class="settings-card">
+          <div class="settings-card-header"><div>账号</div></div>
+          <div class="settings-item" onclick="changePassword()">修改密码 ›</div>
+          <div class="settings-item" onclick="uploadAvatar()">更换头像 ›</div>
+        </div>
+
+        <!-- 能力与连接 -->
+        <div class="settings-card">
+          <div class="settings-card-header"><div>能力与连接</div></div>
+          <div class="settings-item" style="opacity:.5;">连接应用（即将支持）›</div>
+          <div class="settings-item" style="opacity:.5;">技能（即将支持）›</div>
+        </div>
+
+        <button class="logout-btn" onclick="logout()">退出登录</button>
+      </div>
     </section>
   </div>
 
@@ -1292,11 +1402,214 @@ body {
 
 <script>
 const API = "";  // 同源，留空
-const TOKEN_KEY = "agent_api_token";
+
+// ============ 认证（JWT） ============
+const JWT_KEY = "agent_jwt";
+const USER_KEY = "agent_user";
+
+function getJwt() {
+  return localStorage.getItem(JWT_KEY) || "";
+}
+
+function getCurrentUser() {
+  try {
+    return JSON.parse(localStorage.getItem(USER_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function logout() {
+  localStorage.removeItem(JWT_KEY);
+  localStorage.removeItem(USER_KEY);
+  window.location.href = "/login";
+}
+
 function getAuthHeaders() {
-  const t = localStorage.getItem(TOKEN_KEY) || "";
+  const t = getJwt();
   return t ? { "Authorization": "Bearer " + t } : {};
 }
+
+// 未登录 → 跳登录页
+if (!getJwt()) {
+  window.location.href = "/login";
+}
+
+// ============ 设置页 ============
+async function loadSettings() {
+  const u = getCurrentUser();
+  if (u) {
+    document.getElementById("settings-email").textContent = u.email || "";
+    document.getElementById("settings-nickname").textContent = u.nickname || u.email || "";
+    if (u.avatar_path) {
+      document.getElementById("settings-avatar").src = "/" + u.avatar_path;
+    }
+  }
+  await loadModelConfigs();
+  await loadStats();
+}
+
+async function loadStats() {
+  const el = document.getElementById("stats-content");
+  if (!el) return;
+  el.textContent = "加载中…";
+  try {
+    const r = await fetch(API + "/stats?days=30", { headers: { ...getAuthHeaders() } });
+    const d = await r.json();
+    el.innerHTML = `
+      <div style="font-size:13px;color:#86868b;">消息数（用户 / 助手）</div>
+      <div style="font-size:22px;font-weight:600;">${d.user_messages} / ${d.assistant_messages}</div>
+      <div style="font-size:13px;color:#86868b;margin-top:8px;">估算 token</div>
+      <div style="font-size:22px;font-weight:600;">${(d.estimated_total_tokens || 0).toLocaleString()}</div>
+      <div style="font-size:13px;color:#86868b;margin-top:8px;">估算费用</div>
+      <div style="font-size:22px;font-weight:600;">¥${d.estimated_cost_rmb ?? 0}</div>
+      <div style="font-size:11px;color:#c7c7cc;margin-top:6px;">${d.note || ""}</div>
+    `;
+  } catch (e) {
+    el.textContent = "加载失败";
+  }
+}
+
+async function editNickname() {
+  const current = getCurrentUser()?.nickname || "";
+  const nn = prompt("新昵称：", current);
+  if (!nn || nn === current) return;
+  const r = await fetch(API + "/account/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ nickname: nn }),
+  });
+  if (r.ok) {
+    const u = getCurrentUser();
+    if (u) { u.nickname = nn; localStorage.setItem(USER_KEY, JSON.stringify(u)); }
+    loadSettings();
+  }
+}
+
+async function changePassword() {
+  const oldPwd = prompt("当前密码：");
+  if (!oldPwd) return;
+  const newPwd = prompt("新密码（至少 8 位）：");
+  if (!newPwd) return;
+  const r = await fetch(API + "/account/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }),
+  });
+  if (r.ok) alert("密码已修改");
+  else {
+    let msg = "修改失败";
+    try { msg = (await r.json()).detail || msg; } catch {}
+    alert(msg);
+  }
+}
+
+function uploadAvatar() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    const r = await fetch(API + "/account/avatar", {
+      method: "POST",
+      headers: { ...getAuthHeaders() },
+      body: form,
+    });
+    if (r.ok) {
+      const d = await r.json();
+      const u = getCurrentUser();
+      if (u) { u.avatar_path = d.avatar_path; localStorage.setItem(USER_KEY, JSON.stringify(u)); }
+      loadSettings();
+    } else {
+      alert("上传失败");
+    }
+  };
+  input.click();
+}
+
+// ============ 模型配置（用户自带 LLM key） ============
+async function loadModelConfigs() {
+  const el = document.getElementById("model-configs-list");
+  if (!el) return;
+  el.innerHTML = "加载中…";
+  try {
+    const r = await fetch(API + "/model-configs", { headers: { ...getAuthHeaders() } });
+    const data = await r.json();
+    const configs = data.configs || [];
+    if (configs.length === 0) {
+      el.innerHTML = '<div style="color:#86868b;font-size:13px;">还没有配置，将使用服务端默认模型。点右上角添加自己的 key。</div>';
+      return;
+    }
+    el.innerHTML = "";
+    for (const c of configs) {
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #f0f0f3;";
+      row.innerHTML = `
+        <div>
+          <div style="font-size:14px;font-weight:500;">${escapeHtml(c.name)} ${c.is_default ? '<span style="color:#34c759;font-size:11px;margin-left:6px;">默认</span>' : ''}</div>
+          <div style="font-size:12px;color:#86868b;">${escapeHtml(c.provider)} · ${escapeHtml(c.model_id)}</div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          ${!c.is_default ? `<button onclick="setDefaultModel(${c.id})" style="background:none;border:none;color:#007aff;font-size:12px;cursor:pointer;">设为默认</button>` : ''}
+          <button onclick="deleteModelConfig(${c.id})" style="background:none;border:none;color:#ff3b30;font-size:12px;cursor:pointer;">删除</button>
+        </div>
+      `;
+      el.appendChild(row);
+    }
+  } catch (e) {
+    el.innerHTML = `<div style="color:#ff3b30;font-size:13px;">加载失败：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function setDefaultModel(cfgId) {
+  await fetch(API + `/model-configs/${cfgId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ is_default: 1 }),
+  });
+  loadModelConfigs();
+}
+
+async function deleteModelConfig(cfgId) {
+  if (!confirm("删除这个模型配置？")) return;
+  await fetch(API + `/model-configs/${cfgId}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() },
+  });
+  loadModelConfigs();
+}
+
+async function openModelForm() {
+  const r = await fetch(API + "/model-configs/presets", { headers: { ...getAuthHeaders() } });
+  const { presets } = await r.json();
+
+  const provider = prompt("选择 provider：\n" + Object.keys(presets).join(" / "), "qwen");
+  if (!provider || !presets[provider]) return;
+
+  const model_id = prompt(`选择模型（${provider}）：\n` + presets[provider].models.join(" / "), presets[provider].models[0]);
+  if (!model_id) return;
+
+  const name = prompt("给这个配置起个名字：", `${provider}-${model_id}`) || `${provider}-${model_id}`;
+  const api_key = prompt("输入 API Key：");
+  if (!api_key) return;
+
+  const rr = await fetch(API + "/model-configs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ name, provider, model_id, api_key, is_default: 1 }),
+  });
+  if (!rr.ok) {
+    alert("添加失败：" + (await rr.text()));
+    return;
+  }
+  loadModelConfigs();
+}
+
+// 切到设置页时加载
+document.querySelector('#tabbar .tab[data-tab="settings"]').addEventListener("click", loadSettings);
 const CHAT_EL = document.getElementById("chat");
 const INPUT_EL = document.getElementById("input");
 const SEND_EL = document.getElementById("send");
@@ -1314,7 +1627,7 @@ async function stopGeneration() {
   // 1. 先发 cancel 请求（关键：在 abort 之前）
   const cancelPromise = fetch(API + "/chat/cancel", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify({ session_id: sessionId }),
   }).catch((e) => console.error("取消失败:", e));
 
@@ -1447,7 +1760,7 @@ async function loadHistory(sid) {
     document.getElementById("task-draft-banner")?.remove();
   }
   try {
-    const r = await fetch(API + `/sessions/${encodeURIComponent(sid)}/history`);
+    const r = await fetch(API + `/sessions/${encodeURIComponent(sid)}/history`, { headers: { ...getAuthHeaders() } });
     if (!r.ok) return;
     const data = await r.json();
 
@@ -1581,7 +1894,7 @@ async function send() {
   try {
     const resp = await fetch(API + "/chat/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
       body: JSON.stringify({
         session_id: sessionId,
         message: text,

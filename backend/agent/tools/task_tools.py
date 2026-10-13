@@ -4,7 +4,7 @@
 """
 from pydantic import BaseModel, Field
 
-from .context import get_context
+from .context import get_context, get_current_user_id
 from .registry import tool
 
 
@@ -13,6 +13,10 @@ def _get_tasks():
     if tasks is None:
         raise RuntimeError("tasks store 未初始化。请先 set_context(tasks=...)")
     return tasks
+
+
+def _uid() -> int:
+    return get_current_user_id()
 
 
 # ============================================================
@@ -80,6 +84,7 @@ async def create_task(args: CreateTaskArgs) -> str:
 
     try:
         task_id = await tasks.create(
+            _uid(),
             name=args.name,
             prompt=args.prompt,
             icon=args.icon or "📋",
@@ -145,7 +150,7 @@ class FinalizeTaskArgs(BaseModel):
 async def finalize_task(args: FinalizeTaskArgs) -> str:
     tasks = _get_tasks()
 
-    task = await tasks.get(args.task_id)
+    task = await tasks.get(_uid(), args.task_id)
     if not task:
         return f"❌ 任务 #{args.task_id} 不存在"
     if task.get("status") != "draft":
@@ -162,6 +167,7 @@ async def finalize_task(args: FinalizeTaskArgs) -> str:
     # 更新字段
     try:
         await tasks.update(
+            _uid(),
             args.task_id,
             name=args.name,
             prompt=args.prompt,
@@ -175,14 +181,14 @@ async def finalize_task(args: FinalizeTaskArgs) -> str:
         return f"❌ 参数错误：{e}"
 
     # 激活
-    ok = await tasks.activate(args.task_id)
+    ok = await tasks.activate(_uid(), args.task_id)
     if not ok:
         return "❌ 激活失败（可能状态不是 draft）"
 
     # 同步调度器
     try:
         from tasks import scheduler as sched
-        task = await tasks.get(args.task_id)
+        task = await tasks.get(_uid(), args.task_id)
         if task:
             sched.register_task(task)
     except Exception as e:

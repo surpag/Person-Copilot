@@ -8,6 +8,7 @@ uvicorn[standard]
 pydantic
 PyJWT
 cryptography
+bcrypt
 tavily-python
 python-multipart
 

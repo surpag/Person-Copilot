@@ -14,7 +14,7 @@ from session.schema import connect
 from session.trace import Tracer, Trace, TraceStep, trace_step
 from prompt import build_system_prompt
 from memory import PreferencesStore, TodosStore, NotesStore, TasksStore, init_tables
-from tools import set_context
+from tools import set_context, set_current_user_id
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -150,24 +150,22 @@ class Agent:
         self,
         system_prompt: str,
         session_id: str | None = None,
+        user_id: int = 0,
+        llm_config: dict | None = None,
         on_token: Callable[[str, str], None] | None = None,
     ):
         # system_prompt = "你是一个聊天助手，可以使用工具帮助用户解决问题。"
-        self.client = AsyncOpenAI(
-            api_key=os.getenv("LLM_API_KEY"),
-            base_url=os.getenv("LLM_BASE_URL"),
-            timeout=REQUEST_TIMEOUT_S,
-            max_retries=0,  # 不要让 SDK 自动重试放大等待时间
-        )
+        self._llm_config = llm_config or {}
+        self._build_client()
         # self.system_prompt = system_prompt
         self.persona = system_prompt
-        self.model = os.getenv("LLM_MODEL_ID")
         self.messages = [{"role": "system", "content": system_prompt}]
         self.max_steps = 5
         self.KEEP_RECENT_TOKENS = 1200  # 保留最近多少 token 不压缩
         self.KEEP_RECENT_TURNS = 10  # 保留最近多少个完整 turn 不压缩
         self.SUMMARY_MAX_TOKENS = 500  # 摘要本身最大输出
         self.session_id = session_id or str(uuid.uuid4())
+        self.user_id = user_id
         self.store: SessionStore | None = None  # 等 init() 里赋
         self._prefs: PreferencesStore | None = None  # ← 新增
         self._todos: TodosStore | None = None  # ← 新增
@@ -186,6 +184,22 @@ class Agent:
         self.on_token = on_token
         self._ephemeral_turn_ids = set()  # 临时轮次 ID
 
+    def _build_client(self) -> None:
+        """按用户模型配置（或 .env 回退）构建 LLM client。"""
+        cfg = self._llm_config
+        self.client = AsyncOpenAI(
+            api_key=cfg.get("api_key") or os.getenv("LLM_API_KEY"),
+            base_url=cfg.get("base_url") or os.getenv("LLM_BASE_URL"),
+            timeout=REQUEST_TIMEOUT_S,
+            max_retries=0,  # 不要让 SDK 自动重试放大等待时间
+        )
+        self.model = cfg.get("model_id") or os.getenv("LLM_MODEL_ID")
+
+    def update_llm_config(self, llm_config: dict | None) -> None:
+        """用户改了模型配置后热更新 client（pool 复用 Agent 时调用）。"""
+        self._llm_config = llm_config or {}
+        self._build_client()
+
     async def init(self, db_path: str = "agent_memory.db"):
         """打开 DB、创建会话（幂等）、恢复历史。"""
         db = await connect(db_path)
@@ -199,10 +213,10 @@ class Agent:
         # 注入 context，让 @tool 装饰的函数能访问 store
         set_context(preferences=self._prefs, todos=self._todos, notes=self._notes, tasks=self._tasks)
         # 幂等：session 已存在不会重复写
-        await self.store.create_session(self.session_id, self.persona)
+        await self.store.create_session(self.user_id, self.session_id, self.persona)
 
         # 恢复历史（如果 DB 里已经有该 session 的消息）
-        history = await self.store.load(self.session_id)
+        history = await self.store.load(self.user_id, self.session_id)
         if history:
             self.messages = history
             logger.info(f"[session={self.session_id}] 已恢复 {len(history)} 条历史消息")
@@ -219,8 +233,8 @@ class Agent:
         if self._prefs is None or self._todos is None:
             return {"skipped": True, "pref_count": 0, "todo_count": 0}
 
-        prefs = await self._prefs.get_all()
-        todos = await self._todos.list(status="pending")
+        prefs = await self._prefs.get_all(self.user_id)
+        todos = await self._todos.list(self.user_id, status="pending")
 
         content = build_system_prompt(self.persona, prefs, todos)
 
@@ -262,7 +276,7 @@ class Agent:
             return None
 
         try:
-            task = await tasks.get(task_id)
+            task = await tasks.get(self.user_id, task_id)
         except Exception as e:
             logger.warning(f"[scene] 读取任务失败: {e}")
             return None
@@ -491,10 +505,10 @@ class Agent:
                 return None
             summary = response.choices[0].message.content or ""
             # ← 新增：持久化摘要 + 归档历史消息
-            await self.store.upsert_summary(self.session_id, summary)
+            await self.store.upsert_summary(self.user_id, self.session_id, summary)
             keep_count = len(plan["recent"])
             archived_count = await self.store.archive_older_messages(
-                self.session_id, keep_recent=keep_count
+                self.user_id, self.session_id, keep_recent=keep_count
             )
             logger.info(
                 f"[摘要] 持久化完成：摘要已存，归档 {archived_count} 条历史消息"
@@ -656,7 +670,7 @@ class Agent:
         if marker in content:
             db_msg["content"] = content.split(marker)[0].rstrip()
 
-        await self.store.append(self.session_id, db_msg)
+        await self.store.append(self.user_id, self.session_id, db_msg)
 
     async def _chat(self, user_input: str, image_path: str | None = None):
         trace = self.tracer.new_trace(self.session_id, user_input)
@@ -684,6 +698,7 @@ class Agent:
                 logger.error(f"[trace] 保存失败: {e}")
 
     async def chat(self, user_input: str, trace: Trace, image_path: str | None = None):
+        set_current_user_id(self.user_id)
 
         async with trace_step(trace, "memory", "refresh_system_prompt") as s:
             stats = await self._refresh_system_prompt()

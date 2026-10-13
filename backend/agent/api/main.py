@@ -40,10 +40,16 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel
-from api.auth import require_token
 from api.pool import pool, DEFAULT_DB_PATH
 from api.schemas import ChatRequest, ChatResponse, HealthResponse
 from api.vision import describe_image
+from api.auth_routes import router as auth_router
+from auth.schema import init_auth_tables
+from auth.deps import get_current_user
+from auth.model_config_routes import router as model_config_router, get_user_llm_config
+from auth.model_config_schema import init_model_config_tables
+from auth.account_routes import router as account_router, AVATAR_DIR
+from api.stats_routes import router as stats_router
 
 # ─── 图片存储配置 ───
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -96,6 +102,8 @@ async def lifespan(app: FastAPI):
     
     db = await schema_connect(DEFAULT_DB_PATH)
     await init_memory_tables(db)
+    await init_auth_tables(db)
+    await init_model_config_tables(db)
     await db.close()
     logger.info("[api] DB schema 已就绪")
     
@@ -112,8 +120,13 @@ async def lifespan(app: FastAPI):
     sched.shutdown()
 
 app = FastAPI(title="Agent API", version="0.1.0", lifespan=lifespan)
+app.include_router(auth_router)
+app.include_router(model_config_router)
+app.include_router(account_router)
+app.include_router(stats_router)
 # 挂载图片静态目录
 app.mount("/uploads", StaticFiles(directory=str(_UPLOAD_DIR)), name="uploads")
+app.mount("/avatars", StaticFiles(directory=str(AVATAR_DIR)), name="avatars")
 # 静态文件
 _static_dir = Path(__file__).resolve().parents[1] / "static"
 
@@ -121,6 +134,11 @@ _static_dir = Path(__file__).resolve().parents[1] / "static"
 @app.get("/")
 async def index():
     return FileResponse(_static_dir / "index.html")
+
+
+@app.get("/login")
+async def login_page():
+    return FileResponse(_static_dir / "login.html")
 
 
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
@@ -157,10 +175,11 @@ async def health() -> HealthResponse:
 # ============================================================
 
 
-@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_token)])
-async def chat(req: ChatRequest) -> ChatResponse:
-    agent = await pool.get(req.session_id)
-    lock = pool.lock(req.session_id)
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest, user: dict = Depends(get_current_user)) -> ChatResponse:
+    user_cfg = await get_user_llm_config(user["id"])
+    agent = await pool.get(req.session_id, user["id"], user_cfg)
+    lock = pool.lock(req.session_id, user["id"])
 
     async with lock:
         try:
@@ -177,11 +196,13 @@ async def chat(req: ChatRequest) -> ChatResponse:
 # ============================================================
 
 
-# dependencies:进入函数前，先执行require_token方法
-@app.post("/chat/stream", dependencies=[Depends(require_token)])
-async def chat_stream(req: ChatRequest):
-    agent = await pool.get(req.session_id)
-    lock = pool.lock(req.session_id)
+# dependencies:进入函数前，先执行 get_current_user
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    user_cfg = await get_user_llm_config(user_id)
+    agent = await pool.get(req.session_id, user_id, user_cfg)
+    lock = pool.lock(req.session_id, user_id)
 
     async def event_generator():
         set_last_user_content(req.message or "")  # ← 新增，在图片处理之前
@@ -256,6 +277,7 @@ async def chat_stream(req: ChatRequest):
 
                 try:
                     await agent.store.update_last_assistant_metrics(
+                        user_id,
                         req.session_id,
                         elapsed_ms=round(elapsed_ms),
                         ttft_ms=ttft_final,
@@ -279,6 +301,7 @@ async def chat_stream(req: ChatRequest):
                     try:
                         await asyncio.shield(
                             agent.store.append(
+                                user_id,
                                 req.session_id,
                                 {
                                     "role": "assistant",
@@ -319,7 +342,7 @@ async def chat_stream(req: ChatRequest):
         try:
             async with lock:
                 task = asyncio.create_task(run_chat())
-                pool.register_task(req.session_id, task)
+                pool.register_task(req.session_id, task, user_id)
                 try:
                     while True:
                         item = await queue.get()
@@ -332,7 +355,7 @@ async def chat_stream(req: ChatRequest):
                     except asyncio.CancelledError:
                         pass  # 忽略：前端会收到 interrupted 事件
                 finally:
-                    pool.clear_task(req.session_id)
+                    pool.clear_task(req.session_id, user_id)
         finally:
             agent.on_token = old_on_token
 
@@ -351,14 +374,12 @@ async def chat_stream(req: ChatRequest):
 # ============================================================
 
 
-@app.delete("/sessions/{session_id}", dependencies=[Depends(require_token)])
-async def drop_session(session_id: str):
+@app.delete("/sessions/{session_id}")
+async def drop_session(session_id: str, user: dict = Depends(get_current_user)):
     """关闭某个 session 的 Agent（释放内存，不删数据）。"""
-    agent = pool._agents.pop(session_id, None)
-    pool._locks.pop(session_id, None)
-    if agent is None:
+    ok = await pool.drop(session_id, user["id"])
+    if not ok:
         raise HTTPException(status_code=404, detail="Session not found")
-    await agent.close()
     return {"status": "closed", "session_id": session_id}
 
 
@@ -367,16 +388,16 @@ async def drop_session(session_id: str):
 # ============================================================
 
 
-@app.get("/sessions", dependencies=[Depends(require_token)])
-async def list_sessions(limit: int = 30):
+@app.get("/sessions")
+async def list_sessions(limit: int = 30, user: dict = Depends(get_current_user)):
     """列出最近的会话（用于前端下拉框）。"""
     conn = sqlite3.connect(DEFAULT_DB_PATH)
     conn.row_factory = sqlite3.Row
     try:
         rows = conn.execute(
             "SELECT session_id, updated_at FROM sessions "
-            "ORDER BY updated_at DESC LIMIT ?",
-            (limit,),
+            "WHERE user_id = ? ORDER BY updated_at DESC LIMIT ?",
+            (user["id"], limit),
         ).fetchall()
     finally:
         conn.close()
@@ -385,11 +406,12 @@ async def list_sessions(limit: int = 30):
     ]
 
 
-@app.get("/sessions/{session_id}/history", dependencies=[Depends(require_token)])
+@app.get("/sessions/{session_id}/history")
 async def get_history(
     session_id: str,
     limit: int = 50,
     before_id: int | None = None,
+    user: dict = Depends(get_current_user),
 ):
     """读取会话历史。含归档消息，取最新的 limit 条。
 
@@ -404,12 +426,12 @@ async def get_history(
                 "  SELECT id, role, content, image_path, elapsed_ms, ttft_ms, "
                 "         archived, interrupted, created_at "
                 "  FROM messages "
-                "  WHERE session_id = ? AND id < ? "
+                "  WHERE user_id = ? AND session_id = ? AND id < ? "
                 "    AND role IN ('user', 'assistant') "
                 "    AND (content != '' OR image_path IS NOT NULL) "
                 "  ORDER BY id DESC LIMIT ?"
                 ") ORDER BY id ASC",
-                (session_id, before_id, limit),
+                (user["id"], session_id, before_id, limit),
             ).fetchall()
         else:
             rows = conn.execute(
@@ -417,12 +439,12 @@ async def get_history(
                 "  SELECT id, role, content, image_path, elapsed_ms, ttft_ms, "
                 "         archived, interrupted, created_at "
                 "  FROM messages "
-                "  WHERE session_id = ? "
+                "  WHERE user_id = ? AND session_id = ? "
                 "    AND role IN ('user', 'assistant') "
                 "    AND (content != '' OR image_path IS NOT NULL) "
                 "  ORDER BY id DESC LIMIT ?"
                 ") ORDER BY id ASC",
-                (session_id, limit),
+                (user["id"], session_id, limit),
             ).fetchall()
     finally:
         conn.close()
@@ -458,16 +480,16 @@ class TaskUpdateRequest(BaseModel):
     schedule: str | None = None
     enabled: int | None = None
 
-@app.post("/chat/cancel", dependencies=[Depends(require_token)])
-async def cancel_chat(req: CancelRequest):
+@app.post("/chat/cancel")
+async def cancel_chat(req: CancelRequest, user: dict = Depends(get_current_user)):
     """取消指定 session 的运行中对话。"""
-    cancelled = pool.cancel_task(req.session_id)
+    cancelled = pool.cancel_task(req.session_id, user["id"])
     logger.info(f"[api] cancel session={req.session_id} result={cancelled}")
     return {"cancelled": cancelled, "session_id": req.session_id}
 
 
-@app.get("/memories", dependencies=[Depends(require_token)])
-async def list_memories():
+@app.get("/memories")
+async def list_memories(user: dict = Depends(get_current_user)):
     """
     列出所有记忆。
     返回结构：{ scope: { category: [条目] } }
@@ -481,14 +503,14 @@ async def list_memories():
     await init_tables(db)
     try:
         prefs = PreferencesStore(db)
-        grouped = await prefs.list_grouped()
+        grouped = await prefs.list_grouped(user["id"])
     finally:
         await db.close()
 
     return {"scopes": grouped}
 
-@app.delete("/memories/{mem_id}", dependencies=[Depends(require_token)])
-async def delete_memory(mem_id: int):
+@app.delete("/memories/{mem_id}")
+async def delete_memory(mem_id: int, user: dict = Depends(get_current_user)):
     """删除一条偏好记忆。"""
     from memory import PreferencesStore, init_tables
     from session.schema import connect as schema_connect
@@ -497,7 +519,7 @@ async def delete_memory(mem_id: int):
     await init_tables(db)
     try:
         prefs = PreferencesStore(db)
-        ok = await prefs.delete_by_id(mem_id)
+        ok = await prefs.delete_by_id(user["id"], mem_id)
     finally:
         await db.close()
 
@@ -514,8 +536,8 @@ class TaskDraftRequest(BaseModel):
     category: str = "general"
 
 
-@app.post("/tasks/draft", dependencies=[Depends(require_token)])
-async def create_task_draft(req: TaskDraftRequest):
+@app.post("/tasks/draft")
+async def create_task_draft(req: TaskDraftRequest, user: dict = Depends(get_current_user)):
     """
     预创建一个 draft 任务。
     用于"点 + 新建任务"：前端拿到 task_id，跳到 task-{id} 会话，
@@ -526,7 +548,7 @@ async def create_task_draft(req: TaskDraftRequest):
     db = await _open_memory_db()
     try:
         store = TasksStore(db)
-        task_id = await store.create_draft(category=req.category)
+        task_id = await store.create_draft(user["id"], category=req.category)
     finally:
         await db.close()
 
@@ -547,12 +569,13 @@ async def _open_memory_db():
     return db
 
 
-@app.get("/tasks", dependencies=[Depends(require_token)])
+@app.get("/tasks")
 async def list_tasks(
     category: str | None = None,
     trigger_type: str | None = None,
     enabled_only: bool = False,
     status: str = "active",          # ← 新增，默认只查 active
+    user: dict = Depends(get_current_user),
 ):
     """列出任务模板。status='all' 可查全部（含 draft）。"""
     from memory import TasksStore
@@ -561,6 +584,7 @@ async def list_tasks(
     try:
         store = TasksStore(db)
         tasks = await store.list_all(
+            user["id"],
             category=category,
             trigger_type=trigger_type,
             enabled_only=enabled_only,
@@ -570,8 +594,8 @@ async def list_tasks(
         await db.close()
     return {"tasks": tasks}
 
-@app.post("/tasks", dependencies=[Depends(require_token)])
-async def create_task(req: TaskCreateRequest):
+@app.post("/tasks")
+async def create_task(req: TaskCreateRequest, user: dict = Depends(get_current_user)):
     """新建任务。"""
     from memory import TasksStore
 
@@ -579,6 +603,7 @@ async def create_task(req: TaskCreateRequest):
     try:
         store = TasksStore(db)
         task_id = await store.create(
+            user["id"],
             name=req.name,
             prompt=req.prompt,
             icon=req.icon,
@@ -601,15 +626,15 @@ async def create_task(req: TaskCreateRequest):
         try:
             from memory import TasksStore
             store2 = TasksStore(db2)
-            task = await store2.get(task_id)
+            task = await store2.get(user["id"], task_id)
         finally:
             await db2.close()
         if task:
             sched.register_task(task)
     return {"id": task_id, "created": True}
 
-@app.get("/task-runs", dependencies=[Depends(require_token)])
-async def list_task_runs(days: int = 7):
+@app.get("/task-runs")
+async def list_task_runs(days: int = 7, user: dict = Depends(get_current_user)):
     """
     任务执行记录，按天分组。
     返回：{"grouped": {"today": [...], "yesterday": [...], "2026-10-10": [...]}}
@@ -619,12 +644,12 @@ async def list_task_runs(days: int = 7):
     db = await _open_memory_db()
     try:
         store = TaskRunsStore(db)
-        grouped = await store.list_grouped_by_day(days=days)
+        grouped = await store.list_grouped_by_day(user["id"], days=days)
     finally:
         await db.close()
     return {"grouped": grouped}
-@app.patch("/tasks/{task_id}", dependencies=[Depends(require_token)])
-async def update_task(task_id: int, req: TaskUpdateRequest):
+@app.patch("/tasks/{task_id}")
+async def update_task(task_id: int, req: TaskUpdateRequest, user: dict = Depends(get_current_user)):
     """更新任务（局部）。"""
     from memory import TasksStore
 
@@ -633,7 +658,7 @@ async def update_task(task_id: int, req: TaskUpdateRequest):
         store = TasksStore(db)
         fields = {k: v for k, v in req.model_dump().items() if v is not None}
         try:
-            ok = await store.update(task_id, **fields)
+            ok = await store.update(user["id"], task_id, **fields)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     finally:
@@ -649,7 +674,7 @@ async def update_task(task_id: int, req: TaskUpdateRequest):
     try:
         from memory import TasksStore
         store2 = TasksStore(db2)
-        task = await store2.get(task_id)
+        task = await store2.get(user["id"], task_id)
     finally:
         await db2.close()
     if task:
@@ -658,8 +683,8 @@ async def update_task(task_id: int, req: TaskUpdateRequest):
     return {"updated": True, "id": task_id}
 
 
-@app.delete("/tasks/{task_id}", dependencies=[Depends(require_token)])
-async def delete_task(task_id: int):
+@app.delete("/tasks/{task_id}")
+async def delete_task(task_id: int, user: dict = Depends(get_current_user)):
     """删除任务。内置任务会被拒绝。"""
     from memory import TasksStore
 
@@ -670,7 +695,7 @@ async def delete_task(task_id: int):
     db = await _open_memory_db()
     try:
         store = TasksStore(db)
-        ok, msg = await store.delete(task_id)
+        ok, msg = await store.delete(user["id"], task_id)
     finally:
         await db.close()
 
@@ -678,19 +703,19 @@ async def delete_task(task_id: int):
         raise HTTPException(status_code=400, detail=msg)
     return {"deleted": True, "id": task_id}
 
-@app.delete("/task-runs/{run_id}", dependencies=[Depends(require_token)])
-async def delete_task_run(run_id: int):
+@app.delete("/task-runs/{run_id}")
+async def delete_task_run(run_id: int, user: dict = Depends(get_current_user)):
     """删除单条执行记录。"""
     db = await _open_memory_db()
     try:
-        await db.execute("DELETE FROM task_runs WHERE id = ?", (run_id,))
+        await db.execute("DELETE FROM task_runs WHERE id = ? AND user_id = ?", (run_id, user["id"]))
         await db.commit()
     finally:
         await db.close()
     return {"deleted": True, "id": run_id}
 
-@app.post("/tasks/{task_id}/run", dependencies=[Depends(require_token)])
-async def run_task(task_id: int, session_id: str = "task-runner"):
+@app.post("/tasks/{task_id}/run")
+async def run_task(task_id: int, session_id: str = "task-runner", user: dict = Depends(get_current_user)):
     """
     执行任务：把 task.prompt 作为用户消息发给 Agent。
     返回 SSE 流，和 /chat/stream 结构一致。
@@ -702,7 +727,7 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
     db = await _open_memory_db()
     try:
         store = TasksStore(db)
-        task = await store.get(task_id)
+        task = await store.get(user["id"], task_id)
     finally:
         await db.close()
 
@@ -714,8 +739,9 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
     # 2. 每个任务一个固定会话：task-{id}
     #    draft 阶段的讨论 + 历史执行都在这同一个会话里
     run_session_id = f"task-{task_id}"
-    agent = await pool.get(run_session_id)
-    lock = pool.lock(run_session_id)
+    user_cfg = await get_user_llm_config(user["id"])
+    agent = await pool.get(run_session_id, user["id"], user_cfg)
+    lock = pool.lock(run_session_id, user["id"])
 
     # 3. 创建执行记录（running）+ 更新任务元信息
     from memory import TaskRunsStore
@@ -724,8 +750,8 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
     try:
         runs_store = TaskRunsStore(db2)
         tasks_store = TasksStore(db2)
-        run_id = await runs_store.start(task_id, session_id=run_session_id)
-        await tasks_store.mark_run(task_id)
+        run_id = await runs_store.start(user["id"], task_id, session_id=run_session_id)
+        await tasks_store.mark_run(user["id"], task_id)
     finally:
         await db2.close()
 
@@ -765,6 +791,7 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
                     try:
                         runs_store3 = TaskRunsStore(db3)
                         await runs_store3.finish(
+                            user["id"],
                             run_id,
                             success=success,
                             output=reply_text,
@@ -783,7 +810,7 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
         try:
             async with lock:
                 t = asyncio.create_task(run_chat())
-                pool.register_task(run_session_id, t)
+                pool.register_task(run_session_id, t, user["id"])
                 try:
                     while True:
                         item = await queue.get()
@@ -792,7 +819,7 @@ async def run_task(task_id: int, session_id: str = "task-runner"):
                         yield f"data: {json_lib.dumps(item, ensure_ascii=False)}\n\n"
                     await t
                 finally:
-                    pool.clear_task(run_session_id)
+                    pool.clear_task(run_session_id, user["id"])
         finally:
             agent.on_token = old_on_token
 

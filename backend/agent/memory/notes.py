@@ -1,7 +1,7 @@
 """笔记 CRUD。
 
 数据模型：
-    notes(id, session_id, title, content, tags, created_at, updated_at)
+    notes(id, user_id, session_id, title, content, tags, created_at, updated_at)
 
 设计要点：
 - title 必填：让用户/Agent 明确在记什么
@@ -9,7 +9,6 @@
 - tags 用 JSON 数组存：可过滤
 - list() 只返回 100 字预览：避免把全文注入给 LLM
 """
-
 import json
 from typing import Any
 
@@ -27,6 +26,7 @@ class NotesStore:
     # ---------- 写 ----------
     async def save(
         self,
+        user_id: int,
         title: str,
         content: str,
         tags: list[str] | None = None,
@@ -53,16 +53,17 @@ class NotesStore:
 
         cursor = await self._db.execute(
             """
-            INSERT INTO notes (session_id, title, content, summary, tags, category, lifetime)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO notes (user_id, session_id, title, content, summary, tags, category, lifetime)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, title, content, summary, tags_json, category, lifetime),
+            (user_id, session_id, title, content, summary, tags_json, category, lifetime),
         )
         await self._db.commit()
         return int(cursor.lastrowid)
 
     async def update(
         self,
+        user_id: int,
         note_id: int,
         title: str | None = None,
         content: str | None = None,
@@ -98,30 +99,36 @@ class NotesStore:
             return False
 
         sets.append("updated_at = CURRENT_TIMESTAMP")
+        values.append(user_id)
         values.append(note_id)
 
         cursor = await self._db.execute(
-            f"UPDATE notes SET {', '.join(sets)} WHERE id = ?",
+            f"UPDATE notes SET {', '.join(sets)} WHERE user_id = ? AND id = ?",
             values,
         )
         await self._db.commit()
         return cursor.rowcount > 0
 
-    async def delete(self, note_id: int) -> bool:
-        cursor = await self._db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    async def delete(self, user_id: int, note_id: int) -> bool:
+        cursor = await self._db.execute(
+            "DELETE FROM notes WHERE user_id = ? AND id = ?", (user_id, note_id)
+        )
         await self._db.commit()
         return cursor.rowcount > 0
 
     # ---------- 读 ----------
-    async def get(self, note_id: int) -> dict[str, Any] | None:
+    async def get(self, user_id: int, note_id: int) -> dict[str, Any] | None:
         """返回完整笔记（含全文）。"""
-        cursor = await self._db.execute("SELECT * FROM notes WHERE id = ?", (note_id,))
+        cursor = await self._db.execute(
+            "SELECT * FROM notes WHERE user_id = ? AND id = ?", (user_id, note_id)
+        )
         row = await cursor.fetchone()
         await cursor.close()
         return self._row_to_dict(row) if row else None
 
     async def list(
         self,
+        user_id: int,
         tag: str | None = None,
         keyword: str | None = None,
         limit: int | None = 20,
@@ -135,9 +142,9 @@ class NotesStore:
             "SELECT id, title, summary, tags, category, lifetime, "
             "substr(content, 1, ?) AS preview, "
             "created_at, updated_at "
-            "FROM notes WHERE 1=1"
+            "FROM notes WHERE user_id = ?"
         )
-        params: list[Any] = [PREVIEW_LEN]
+        params: list[Any] = [PREVIEW_LEN, user_id]
 
         if tag:
             sql += " AND tags LIKE ?"
@@ -159,8 +166,10 @@ class NotesStore:
         await cursor.close()
         return [self._row_to_dict(r) for r in rows]
 
-    async def count(self) -> int:
-        cursor = await self._db.execute("SELECT COUNT(*) AS n FROM notes")
+    async def count(self, user_id: int) -> int:
+        cursor = await self._db.execute(
+            "SELECT COUNT(*) AS n FROM notes WHERE user_id = ?", (user_id,)
+        )
         row = await cursor.fetchone()
         await cursor.close()
         return int(row["n"])

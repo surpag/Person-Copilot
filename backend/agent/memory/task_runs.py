@@ -6,6 +6,8 @@
 用途：
 - 前端"今天/昨天"展示执行历史
 - 未来统计"这个任务多久跑一次、成功率多少"
+
+多用户隔离：所有记录以 user_id 为第一维度。
 """
 from datetime import datetime, timedelta
 from typing import Any
@@ -18,20 +20,21 @@ class TaskRunsStore:
         self._db = db
 
     # ---------- 写 ----------
-    async def start(self, task_id: int, session_id: str | None = None) -> int:
+    async def start(self, user_id: int, task_id: int, session_id: str | None = None) -> int:
         """任务开始执行，插入一条 running 记录。返回 run_id。"""
         cursor = await self._db.execute(
             """
-            INSERT INTO task_runs (task_id, status, session_id)
-            VALUES (?, 'running', ?)
+            INSERT INTO task_runs (user_id, task_id, status, session_id)
+            VALUES (?, ?, 'running', ?)
             """,
-            (task_id, session_id),
+            (user_id, task_id, session_id),
         )
         await self._db.commit()
         return int(cursor.lastrowid)
 
     async def finish(
         self,
+        user_id: int,
         run_id: int,
         success: bool,
         output: str | None = None,
@@ -46,7 +49,7 @@ class TaskRunsStore:
                 output = ?,
                 error = ?,
                 duration_ms = ?
-            WHERE id = ?
+            WHERE id = ? AND user_id = ?
             """,
             (
                 "success" if success else "failed",
@@ -54,6 +57,7 @@ class TaskRunsStore:
                 error,
                 duration_ms,
                 run_id,
+                user_id,
             ),
         )
         await self._db.commit()
@@ -61,6 +65,7 @@ class TaskRunsStore:
     # ---------- 读 ----------
     async def list_recent(
         self,
+        user_id: int,
         limit: int = 50,
         task_id: int | None = None,
     ) -> list[dict[str, Any]]:
@@ -69,9 +74,9 @@ class TaskRunsStore:
             SELECT r.*, t.name AS task_name, t.icon AS task_icon
             FROM task_runs r
             LEFT JOIN tasks t ON t.id = r.task_id
-            WHERE 1=1
+            WHERE r.user_id = ?
         """
-        params: list[Any] = []
+        params: list[Any] = [user_id]
         if task_id is not None:
             sql += " AND r.task_id = ?"
             params.append(task_id)
@@ -83,7 +88,7 @@ class TaskRunsStore:
         await cursor.close()
         return [dict(r) for r in rows]
 
-    async def list_grouped_by_day(self, days: int = 7) -> dict[str, list[dict]]:
+    async def list_grouped_by_day(self, user_id: int, days: int = 7) -> dict[str, list[dict]]:
         """
         按天分组。返回 {"today": [...], "yesterday": [...], "2026-10-10": [...]}
         用于前端"今天/昨天/更早"展示。
@@ -95,10 +100,10 @@ class TaskRunsStore:
             SELECT r.*, t.name AS task_name, t.icon AS task_icon
             FROM task_runs r
             LEFT JOIN tasks t ON t.id = r.task_id
-            WHERE date(r.run_at) >= ?
+            WHERE r.user_id = ? AND date(r.run_at) >= ?
             ORDER BY r.run_at DESC
             """,
-            (cutoff,),
+            (user_id, cutoff),
         )
         rows = await cursor.fetchall()
         await cursor.close()
@@ -120,17 +125,18 @@ class TaskRunsStore:
 
         return grouped
 
-    async def get(self, run_id: int) -> dict[str, Any] | None:
+    async def get(self, user_id: int, run_id: int) -> dict[str, Any] | None:
         cursor = await self._db.execute(
-            "SELECT * FROM task_runs WHERE id = ?", (run_id,)
+            "SELECT * FROM task_runs WHERE user_id = ? AND id = ?", (user_id, run_id)
         )
         row = await cursor.fetchone()
         await cursor.close()
         return dict(row) if row else None
 
-    async def count_by_status(self) -> dict[str, int]:
+    async def count_by_status(self, user_id: int) -> dict[str, int]:
         cursor = await self._db.execute(
-            "SELECT status, COUNT(*) AS n FROM task_runs GROUP BY status"
+            "SELECT status, COUNT(*) AS n FROM task_runs WHERE user_id = ? GROUP BY status",
+            (user_id,),
         )
         rows = await cursor.fetchall()
         await cursor.close()

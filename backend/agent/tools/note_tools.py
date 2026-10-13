@@ -13,7 +13,12 @@ from .context import (
     get_last_image_description,
     get_last_user_content,
     clear_last_image_description,
+    get_current_user_id,
 )
+
+
+def _uid() -> int:
+    return get_current_user_id()
 
 
 def _get_notes():
@@ -92,6 +97,7 @@ async def save_note(args: SaveNoteArgs) -> str:
 
     try:
         nid = await notes.save(
+            _uid(),
             title=args.title,
             content=content,
             tags=args.tags or [],
@@ -130,7 +136,7 @@ class ListNotesArgs(BaseModel):
 )
 async def list_notes(args: ListNotesArgs) -> str:
     notes = _get_notes()
-    rows = await notes.list(tag=args.tag, keyword=args.keyword, limit=args.limit)
+    rows = await notes.list(_uid(), tag=args.tag, keyword=args.keyword, limit=args.limit)
     if not rows:
         return "📭 没有符合条件的笔记"
 
@@ -162,7 +168,7 @@ class ReadNoteArgs(BaseModel):
 )
 async def read_note(args: ReadNoteArgs) -> str:
     notes = _get_notes()
-    row = await notes.get(args.id)
+    row = await notes.get(_uid(), args.id)
     if row is None:
         return f"❌ 未找到 id={args.id} 的笔记"
 
@@ -187,11 +193,11 @@ class DeleteNoteArgs(BaseModel):
 )
 async def delete_note(args: DeleteNoteArgs) -> str:
     notes = _get_notes()
-    row = await notes.get(args.id)
+    row = await notes.get(_uid(), args.id)
     if row is None:
         return f"❌ 未找到 id={args.id} 的笔记"
 
-    ok = await notes.delete(args.id)
+    ok = await notes.delete(_uid(), args.id)
     if not ok:
         return f"❌ 删除失败（id={args.id}）"
     return f"✅ 已删除笔记 #{args.id}：《{row['title']}》"

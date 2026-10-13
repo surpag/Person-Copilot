@@ -1,6 +1,8 @@
 """Agent 连接池：session_id → Agent 实例。
 
 每个 Agent 独立 DB 连接，独立历史。同一 session 的请求串行。
+
+多用户隔离：key 用 f"{user_id}:{session_id}" 复合，避免不同用户撞同 session_id。
 """
 import os
 import asyncio
@@ -19,49 +21,78 @@ DEFAULT_DB_PATH = (
 )
 
 
+def _key(user_id: int, session_id: str) -> str:
+    return f"{user_id}:{session_id}"
+
+
 class AgentPool:
     def __init__(self) -> None:
         self._agents: dict[str, Agent] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._guard = asyncio.Lock()  # 保护 _agents / _locks 的创建
-        self._running_tasks: dict[str, asyncio.Task] = {} 
+        self._running_tasks: dict[str, asyncio.Task] = {}
 
-    async def get(self, session_id: str) -> Agent:
-        """获取或创建 session 对应的 Agent。"""
+    async def get(
+        self, session_id: str, user_id: int = 0, llm_config: dict | None = None
+    ) -> Agent:
+        """获取或创建 session 对应的 Agent。llm_config 变化时热更新 client。"""
+        key = _key(user_id, session_id)
+        cfg = llm_config or {}
         async with self._guard:
-            if session_id not in self._agents:
-                logger.info(f"[pool] 创建新 Agent: session={session_id}")
+            if key not in self._agents:
+                logger.info(f"[pool] 创建新 Agent: user={user_id} session={session_id}")
                 agent = Agent(
                     system_prompt=DEFAULT_SYSTEM_PROMPT,
                     session_id=session_id,
+                    user_id=user_id,
+                    llm_config=cfg,
                 )
                 await agent.init(db_path=DEFAULT_DB_PATH)
-                self._agents[session_id] = agent
-                self._locks[session_id] = asyncio.Lock()
-            return self._agents[session_id]
+                self._agents[key] = agent
+                self._locks[key] = asyncio.Lock()
+            else:
+                agent = self._agents[key]
+                if cfg != agent._llm_config:
+                    logger.info(f"[pool] 用户 {user_id} 模型配置变更，热更新 client")
+                    agent.update_llm_config(cfg)
+            return agent
 
-    def lock(self, session_id: str) -> asyncio.Lock:
-        return self._locks[session_id]
+    def lock(self, session_id: str, user_id: int = 0) -> asyncio.Lock:
+        return self._locks[_key(user_id, session_id)]
 
-    def register_task(self, session_id: str, task: asyncio.Task) -> None:
+    def register_task(self, session_id: str, task: asyncio.Task, user_id: int = 0) -> None:
         """注册当前 session 的运行中任务，供取消用。"""
-        old = self._running_tasks.get(session_id)
+        key = _key(user_id, session_id)
+        old = self._running_tasks.get(key)
         if old and not old.done():
             old.cancel()
-        self._running_tasks[session_id] = task
+        self._running_tasks[key] = task
 
-    def cancel_task(self, session_id: str) -> bool:
+    def cancel_task(self, session_id: str, user_id: int = 0) -> bool:
         """取消当前 session 的运行中任务。返回是否真的取消了。"""
-        task = self._running_tasks.pop(session_id, None)
+        key = _key(user_id, session_id)
+        task = self._running_tasks.pop(key, None)
         if task and not task.done():
             task.cancel()
             return True
         return False
 
-    def clear_task(self, session_id: str) -> None:
+    def clear_task(self, session_id: str, user_id: int = 0) -> None:
         """任务完成后清掉注册（避免内存泄漏）。"""
-        self._running_tasks.pop(session_id, None)
-    
+        key = _key(user_id, session_id)
+        self._running_tasks.pop(key, None)
+
+    async def drop(self, session_id: str, user_id: int = 0) -> bool:
+        """关闭并移除某个 session 的 Agent。返回是否真的存在。"""
+        key = _key(user_id, session_id)
+        agent = self._agents.pop(key, None)
+        self._locks.pop(key, None)
+        self._running_tasks.pop(key, None)
+        if agent is None:
+            return False
+        await agent.close()
+        return True
+
     async def close_all(self) -> None:
         for sid, task in list(self._running_tasks.items()):
             if not task.done():

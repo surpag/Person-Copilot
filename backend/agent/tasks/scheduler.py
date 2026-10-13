@@ -1,9 +1,12 @@
 """定时任务调度器。
 
 基于 APScheduler 的 AsyncIOScheduler：
-- 启动时从 DB 加载所有 scheduled + enabled 任务
+- 启动时从 DB 加载所有 scheduled + enabled 任务（跨用户）
 - 创建/更新/删除时同步调度器
 - 到点触发 Agent 执行，结果写入 task_runs
+
+多用户：job 注册时把任务的 user_id 闭包进 args，执行时直接带上，
+避免执行阶段再按 task_id 反查（会因 user_id 隔离而查不到）。
 """
 import asyncio
 import json
@@ -89,7 +92,7 @@ def register_task(task: dict[str, Any]) -> None:
         _run_task_job,
         trigger=trigger,
         id=job_id,
-        args=[task["id"]],
+        args=[task["id"], task["user_id"]],  # ← 闭包 user_id
         replace_existing=True,
         misfire_grace_time=300,   # 错过 5 分钟内仍执行
     )
@@ -110,31 +113,32 @@ def unregister_task(task_id: int) -> None:
 # 执行逻辑（scheduled job 触发时调）
 # ============================================================
 
-async def _run_task_job(task_id: int) -> None:
+async def _run_task_job(task_id: int, user_id: int) -> None:
     """定时触发的执行逻辑。"""
-    logger.info(f"[scheduler] 触发任务 #{task_id}")
+    logger.info(f"[scheduler] 触发任务 #{task_id} (user={user_id})")
 
     # 延迟导入，避免循环依赖
+    from api.pool import DEFAULT_DB_PATH
     from memory import TasksStore, TaskRunsStore
     from session.schema import connect as schema_connect
     from memory import init_tables
 
-    db = await schema_connect("agent_memory.db")
+    db = await schema_connect(DEFAULT_DB_PATH)
     await init_tables(db)
 
     try:
         tasks_store = TasksStore(db)
         runs_store = TaskRunsStore(db)
 
-        task = await tasks_store.get(task_id)
+        task = await tasks_store.get(user_id, task_id)
         if not task or task["status"] != "active" or not task["enabled"]:
             logger.info(f"[scheduler] 任务 #{task_id} 已禁用/暂停，跳过")
             return
 
         # 创建执行记录
         session_id = f"task-{task_id}"
-        run_id = await runs_store.start(task_id, session_id=session_id)
-        await tasks_store.mark_run(task_id)
+        run_id = await runs_store.start(user_id, task_id, session_id=session_id)
+        await tasks_store.mark_run(user_id, task_id)
     finally:
         await db.close()
 
@@ -146,8 +150,10 @@ async def _run_task_job(task_id: int) -> None:
 
     try:
         from api.pool import pool
-        agent = await pool.get(session_id)
-        async with pool.lock(session_id):
+        from auth.model_config_routes import get_user_llm_config
+        user_cfg = await get_user_llm_config(user_id)
+        agent = await pool.get(session_id, user_id, user_cfg)
+        async with pool.lock(session_id, user_id):
             output = await agent._chat(task["prompt"]) or ""
             success = True
     except Exception as e:
@@ -157,10 +163,11 @@ async def _run_task_job(task_id: int) -> None:
     duration_ms = int((datetime.now() - started).total_seconds() * 1000)
 
     # 写结果
-    db2 = await schema_connect("agent_memory.db")
+    db2 = await schema_connect(DEFAULT_DB_PATH)
     try:
         runs_store2 = TaskRunsStore(db2)
         await runs_store2.finish(
+            user_id,
             run_id,
             success=success,
             output=output,
@@ -178,15 +185,16 @@ async def _run_task_job(task_id: int) -> None:
 # ============================================================
 
 async def load_all_tasks() -> None:
-    """从 DB 加载所有 scheduled 任务并注册。启动时调用一次。"""
+    """从 DB 加载所有 scheduled 任务并注册。启动时调用一次（跨用户）。"""
+    from api.pool import DEFAULT_DB_PATH
     from memory import TasksStore, init_tables
     from session.schema import connect as schema_connect
 
-    db = await schema_connect("agent_memory.db")
+    db = await schema_connect(DEFAULT_DB_PATH)
     await init_tables(db)
     try:
         store = TasksStore(db)
-        tasks = await store.list_all(trigger_type="scheduled", status="active")
+        tasks = await store.list_scheduled_all()
         logger.info(f"[scheduler] 加载 {len(tasks)} 个定时任务")
         for t in tasks:
             register_task(t)

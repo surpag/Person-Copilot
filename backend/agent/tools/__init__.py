@@ -12,7 +12,13 @@ from .registry import (
     list_tool_names,
     tool,
 )
-from .context import clear_context, get_context, set_context
+from .context import (
+    clear_context,
+    get_context,
+    set_context,
+    set_current_user_id,
+    get_current_user_id,
+)
 
 from . import builtin  # noqa: F401  —— 时间、天气
 from . import memory_tools  # noqa: F401  —— 偏好、待办
@@ -29,4 +35,6 @@ __all__ = [
     "set_context",
     "get_context",
     "clear_context",
+    "set_current_user_id",
+    "get_current_user_id",
 ]
