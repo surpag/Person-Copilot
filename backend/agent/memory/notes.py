@@ -31,6 +31,8 @@ class NotesStore:
         content: str,
         tags: list[str] | None = None,
         summary: str | None = None,
+        category: str = "lifestyle",
+        lifetime: str = "long_term",
         session_id: str | None = None,
     ) -> int:
         """新建笔记，返回新 id。"""
@@ -51,10 +53,10 @@ class NotesStore:
 
         cursor = await self._db.execute(
             """
-            INSERT INTO notes (session_id, title, content, summary, tags)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO notes (session_id, title, content, summary, tags, category, lifetime)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, title, content, summary, tags_json),
+            (session_id, title, content, summary, tags_json, category, lifetime),
         )
         await self._db.commit()
         return int(cursor.lastrowid)
@@ -130,7 +132,7 @@ class NotesStore:
         - keyword: 模糊匹配 title 或 content
         """
         sql = (
-            "SELECT id, title, summary, tags, "
+            "SELECT id, title, summary, tags, category, lifetime, "
             "substr(content, 1, ?) AS preview, "
             "created_at, updated_at "
             "FROM notes WHERE 1=1"

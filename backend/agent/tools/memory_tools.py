@@ -41,39 +41,77 @@ def _get_todos():
 
 
 class RememberPreferenceArgs(BaseModel):
-    key: str = Field(description="偏好的键，短标识符。例如 city / name / coffee_pref")
-    value: str = Field(description="偏好的值。例如 南京 / 小王 / 美式")
+    key: str = Field(description="偏好的键，短英文标识符，如 city / job_title / nickname")
+    value: str = Field(description="偏好的值，如 南京 / 开发工程师 / 小王")
+    scope: str = Field(
+        default="user",
+        description=(
+            "归属：'user'=关于用户，'agent'=关于助手自身。"
+            "用户说'我是…''我住…'→ user；"
+            "用户说'你叫…''以后叫我…'→ agent。"
+        ),
+    )
+    category: str = Field(
+        default="profile",
+        description=(
+            "具体维度。user 可填：profile(身份)/work(工作)/lifestyle(生活)/"
+            "tools(工具)/goals(目标)/routine(习惯)；"
+            "agent 可填：character(人设)/tone(语气)/constraints(约束)。"
+        ),
+    )
+    lifetime: str = Field(
+        default="long_term",
+        description=(
+            "时效性：'long_term'(稳定事实)/'mid_term'(几周几个月)/"
+            "'transient'(临时状态)。"
+        ),
+    )
 
 
 @tool(
     description=(
-        "记住用户的一条偏好。当用户明确说「记住…」「我是…」「我喜欢…」时使用。"
-        "key 用简短的英文标识符，value 用用户原话或简短表述。"
+        "记住用户的一条偏好、事实或关于助手的设定。\n"
+        "当用户说「记住…」「我是…」「我住…」「以后叫我…」时使用。\n"
+        "**必须选对 scope 和 category**，否则记忆会归错类。"
     )
 )
 async def remember_preference(args: RememberPreferenceArgs) -> str:
     prefs = _get_prefs()
     try:
-        created = await prefs.remember(args.key, args.value)
+        created = await prefs.remember(
+            args.key,
+            args.value,
+            scope=args.scope,
+            category=args.category,
+            lifetime=args.lifetime,
+        )
     except ValueError as e:
         return f"❌ 参数错误：{e}"
+
     verb = "已记住" if created else "已更新"
-    return f"✅ {verb}：{args.key} = {args.value}"
+    return (
+        f"✅ {verb}：{args.key} = {args.value}"
+        f"（{args.scope}/{args.category}/{args.lifetime}）"
+    )
 
 
 class ForgetPreferenceArgs(BaseModel):
     key: str = Field(description="要删除的偏好键")
+    scope: str = Field(default="user", description="user / agent")
+    category: str = Field(default="profile", description="具体维度")
 
 
-@tool(description=("删除一条用户偏好。当用户说「忘掉…」「不要再记…」「删除…」时使用。"))
+@tool(
+    description=(
+        "删除一条用户偏好或助手设定。"
+        "当用户说「忘掉…」「不要再记…」时使用。"
+    )
+)
 async def forget_preference(args: ForgetPreferenceArgs) -> str:
     prefs = _get_prefs()
-    try:
-        ok = await prefs.forget(args.key)
-    except ValueError as e:
-        return f"❌ 参数错误：{e}"
+    ok = await prefs.forget(args.key, scope=args.scope, category=args.category)
     if not ok:
-        return f"❌ 未找到 key={args.key} 的偏好"
+        return f"❌ 未找到 key={args.key} 的记录"
     return f"✅ 已忘记：{args.key}"
 
 

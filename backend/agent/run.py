@@ -13,7 +13,7 @@ from session.store import SessionStore
 from session.schema import connect
 from session.trace import Tracer, Trace, TraceStep, trace_step
 from prompt import build_system_prompt
-from memory import PreferencesStore, TodosStore, NotesStore, init_tables
+from memory import PreferencesStore, TodosStore, NotesStore, TasksStore, init_tables
 from tools import set_context
 
 load_dotenv()
@@ -174,6 +174,7 @@ class Agent:
         self._notes: NotesStore | None = None
         self._db = None
         self.tracer = Tracer("traces")
+        self._tasks: TasksStore | None = None
         # 压缩触发阈值：只管"可压缩的部分"（活跃消息 + 轮数），
         # 不含工具定义/persona/摘要 —— 那些压缩也缩不掉，算进来会让目标态不可达。
         self.MAX_ACTIVE_TOKENS = 3000
@@ -194,8 +195,9 @@ class Agent:
         self._prefs = PreferencesStore(db)
         self._todos = TodosStore(db)
         self._notes = NotesStore(db)
+        self._tasks = TasksStore(db)
         # 注入 context，让 @tool 装饰的函数能访问 store
-        set_context(preferences=self._prefs, todos=self._todos, notes=self._notes)
+        set_context(preferences=self._prefs, todos=self._todos, notes=self._notes, tasks=self._tasks)
         # 幂等：session 已存在不会重复写
         await self.store.create_session(self.session_id, self.persona)
 
@@ -211,9 +213,9 @@ class Agent:
 
     async def _refresh_system_prompt(self) -> dict:
         """
-        从 store 读取最新偏好和待办，重新组装 system prompt，
-        并替换 messages 里的第一条非摘要 system 消息。
-        """
+    从 store 读取最新偏好和待办，重新组装 system prompt，
+    并替换 messages 里的第一条非摘要 system 消息。
+    """
         if self._prefs is None or self._todos is None:
             return {"skipped": True, "pref_count": 0, "todo_count": 0}
 
@@ -222,19 +224,71 @@ class Agent:
 
         content = build_system_prompt(self.persona, prefs, todos)
 
+        # ─── 场景检测：任务创建会话 ───
+        scene_hint = await self._detect_scene_hint()
+        if scene_hint:
+            content += "\n\n" + scene_hint
+
+        # 替换第一条非摘要 system 消息
         for i, m in enumerate(self.messages):
-            if m["role"] == "system" and not (m.get("content") or "").startswith(
-                SUMMARY_TAG
-            ):
-                # 隐形问题，直接替换可能会丢掉原始system内容
+            if m["role"] == "system" and not (m.get("content") or "").startswith(SUMMARY_TAG):
                 self.messages[i] = {"role": "system", "content": content}
                 break
 
         return {
-            "skipped": False,
-            "pref_count": len(prefs),
-            "todo_count": len(todos),
+        "skipped": False,
+        "pref_count": len(prefs),
+        "todo_count": len(todos),
+        "scene": "task_create" if scene_hint else "default",
         }
+
+
+    async def _detect_scene_hint(self) -> str | None:
+        """
+    检测当前会话是否处于特殊场景（如任务创建）。
+    返回一段追加到 system prompt 的提示，或 None。
+    """
+        # 场景 1：任务创建会话（session_id 形如 task-{id}，且任务 status=draft）
+        if not self.session_id.startswith("task-"):
+            return None
+
+        tasks = getattr(self, "_tasks", None)
+        if tasks is None:
+            return None
+
+        try:
+            task_id = int(self.session_id.split("-", 1)[1])
+        except (ValueError, IndexError):
+            return None
+
+        try:
+            task = await tasks.get(task_id)
+        except Exception as e:
+            logger.warning(f"[scene] 读取任务失败: {e}")
+            return None
+
+        if not task or task.get("status") != "draft":
+            return None
+
+        return (
+        f"## 当前场景：任务创建\n\n"
+        f"你正在帮用户创建一个新任务（任务 ID: **{task_id}**）。\n\n"
+        f"**流程**：\n"
+        f"1. 用户会描述需求，你通过对话逐步明确：\n"
+        f"   - `name`：任务名称（20 字内）\n"
+        f"   - `prompt`：任务执行时发给 Agent 的完整指令\n"
+        f"   - `trigger_type`：manual（手动）还是 scheduled（定时）\n"
+        f"   - `schedule`：如果是定时，需要 cron 表达式（如 '0 8 * * *'）\n"
+        f"   - `icon`：一个 emoji\n"
+        f"   - `category`：general/work/life/learning/health\n"
+        f"2. **信息足够后，必须调用 `finalize_task` 工具**，传入 task_id={task_id} 和所有字段\n"
+        f"3. 调用成功后**只回一句确认**\n\n"
+        f"**关键约束**：\n"
+        f"- 不要着急 finalize，先问清关键信息\n"
+        f"- 用户说'每天早上 8 点' → trigger_type='scheduled', schedule='0 8 * * *'\n"
+        f"- 用户说'帮我看看' → trigger_type='manual'\n"
+        f"- **绝对不要直接调用 create_task 工具**（那是给主聊天用的）"
+        )
 
     @staticmethod
     def _is_context_overflow(exc: Exception) -> bool:
@@ -708,6 +762,15 @@ class Agent:
                         )
                         continue
                     result = await invoke_tool(func_name, raw_args)
+                    # 通知前端：工具调用完成（用于场景联动）
+                    if self.on_token:
+                        self.on_token(
+                            json.dumps({
+                                "name": func_name,
+                                "success": str(result).startswith("✅"),
+                            }),
+                            "tool_call",
+                        )
                     s.output = result[:200]
                     if result.startswith(("错误", "参数", "工具执行失败")):
                         s.error = result[:200]

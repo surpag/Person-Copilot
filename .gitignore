@@ -1,28 +1,32 @@
-@"
 # Python
 __pycache__/
 *.py[cod]
 .venv/
 venv/
 
-# »·¾³±äÁ¿£¨º¬ÃÜÔ¿£©
+# ç¯å¢ƒå˜é‡ï¼ˆå«å¯†é’¥ï¼‰
 .env
 
-# Ë½Ô¿£¨¾ø²»Ó¦Ìá½»£©
+# ç§é’¥ï¼ˆç»ä¸åº”æäº¤ï¼‰
 *.pem
 backend/agent/keys/
 
-# Êı¾İ£¨º¬ÓÃ»§Êı¾İ£©
+# æ•°æ®ï¼ˆå«ç”¨æˆ·æ•°æ®ï¼‰
 data/
 traces/
+uploads/
 *.db
 *.db-journal
 
-# Ò»´ÎĞÔ½Å±¾
+# ä¸€æ¬¡æ€§è„šæœ¬
 check_*.py
+clean_*.py
+create_admin.py
+test_*.py
 
+# å·¥å…·ç›®å½•
 .workbuddy/
+
 # IDE
 .vscode/
 .idea/
-"@ | Out-File -Encoding utf8 .gitignore

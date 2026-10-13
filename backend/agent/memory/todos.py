@@ -27,6 +27,8 @@ class TodosStore:
         self,
         content: str,
         due: str | None = None,
+        category: str = "work",
+        lifetime: str = "mid_term",
         session_id: str | None = None,
     ) -> int:
         """
@@ -40,10 +42,10 @@ class TodosStore:
 
         cursor = await self._db.execute(
             """
-            INSERT INTO todos (content, due, session_id)
-            VALUES (?, ?, ?)
+            INSERT INTO todos (content, due, category, lifetime, session_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (content, due, session_id),
+            (content, due, category, lifetime, session_id),
         )
         await self._db.commit()
         return int(cursor.lastrowid)

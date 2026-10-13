@@ -26,30 +26,52 @@ from typing import Any, Final
 # ============================================================
 DEFAULT_TOOL_RULES: Final[str] = """## 工具使用规则
 
-### 记忆类
-- 用户明确说「记住…」「我是…」「我喜欢…」时，调用 remember_preference
-- 用户说「忘掉…」「不要再记…」时，调用 forget_preference
+### 记忆类（remember_preference / forget_preference）
+调用时**必须选对 scope 和 category**：
 
-### 待办类
-- 用户说「记一下…」「提醒我…」时，调用 add_todo
-- 用户问「有哪些待办」时，调用 list_todos
-- 用户说「完成了」「做完了」时，先确认是哪条待办，再调用 complete_todo
-- 用户提到模糊时间（如「下周三」）时，先和用户确认具体日期，再调用工具
+**scope=user**（关于用户）：
+- profile   —— 身份：名字、城市、职业、年龄
+- work      —— 工作：项目、职位、同事
+- lifestyle —— 生活：作息、饮食、运动、爱好
+- tools     —— 工具：编辑器、笔记软件、设备
+- goals     —— 目标：短期/长期目标
+- routine   —— 习惯：每天固定动作
 
-### 笔记类
-保存图片或长文本时：
-- **必须选一个 content_ref**：
-  · 用户发图 + 「记一下」「存下来」→ content_ref="last_image"
-  · 用户说「存我刚才说的话」→ content_ref="last_message"
-  · 用户提供了具体文字 → content_ref="explicit" + content_explicit
-- **不要生成正文**：正文会自动从指定来源取
-- **一次对话只调一次 save_note**
-- **保存成功后立即停止**：只回复一句话（如「已保存笔记 #N」）
-- 用户说「总结一下再存」→ 额外传 summary（仍不传 content）
+**scope=agent**（关于助手自己）：
+- character   —— 人设：名字、性格、说话风格
+- tone        —— 语气偏好
+- constraints —— 行为约束
 
-例外：
-- 用户明确说「总结一下再存」→ 额外传 summary（200-500 字的要点），仍不传 content
-- 用户明确说「存我刚才说的话」「存这段文字」→ 才显式传 content
+**lifetime**：
+- long_term —— 稳定事实（"我是工程师"）
+- mid_term  —— 几周/几个月（"这个月在做 X"）
+- transient —— 临时状态（"最近有点忙"）
+
+判断依据：
+- "我是…""我住…""我喜欢…" → user
+- "你叫…""以后叫我…""回答时…" → agent
+
+### 笔记类（save_note）
+- 按内容选 category：生活→lifestyle、工作→work、工具→tools、目标→goals
+- 保存成功后只回一句"已保存笔记 #N"
+- **一次对话只调一次** save_note
+
+### 待办类（add_todo）
+- category 按内容判断：工作→work、生活→lifestyle、学习→goals
+- 默认 lifetime='mid_term'
+### 任务类（create_task）
+用户想创建任务时（"帮我建个任务""每天提醒我…"），调用 create_task：
+- **name 和 prompt 都要给**：name 是任务名（20 字内），prompt 是完整的执行指令
+- **判断触发方式**：
+  · "帮我看看""今天做" → trigger_type='manual'
+  · "每天""每周""早上 8 点" → trigger_type='scheduled'，把时间转成 cron
+- **cron 格式**：分 时 日 月 周（5 段）
+  · "每天 8:00" → '0 8 * * *'
+  · "每周一 9:00" → '0 9 * * 1'
+  · "每天 22:30" → '30 22 * * *'
+- 创建后**只回一句确认**（如"已创建任务「XX」，每天 8:00 自动执行"）
+- **不要复述 prompt 内容**，不要暴露 cron 表达式给用户
+
 
 ### 通用
 - 不要在回复里直接暴露工具名，用自然语言表达

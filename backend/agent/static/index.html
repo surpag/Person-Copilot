@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent Chat</title>
+<meta name="theme-color" content="#007aff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Copilot">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="apple-touch-icon" href="/static/icon.svg">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -239,23 +246,804 @@
   font-size: 13px;
   opacity: .7;
 }
+/* ========== 移动端 Tab 布局 ========== */
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+#app {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+#page-task-detail.active {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #f5f5f7;
+}
+.page {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.page.active { display: flex; }
+
+.page-header {
+  background: #fff;
+  border-bottom: 1px solid #e5e5ea;
+  padding: 16px 20px;
+  font-size: 22px;
+  font-weight: 700;
+}
+.page-header h1 { font-size: 22px; margin: 0; }
+
+.placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #86868b;
+  font-size: 14px;
+}
+
+/* 底部 Tab 栏 */
+#tabbar {
+  display: flex;
+  height: 60px;
+  background: #fff;
+  border-top: 1px solid #e5e5ea;
+  padding-bottom: env(safe-area-inset-bottom);   /* iPhone 底部安全区 */
+  flex-shrink: 0;
+}
+
+#tabbar .tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: transparent;
+  border: none;
+  color: #86868b;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+#tabbar .tab span {
+  font-size: 20px;
+  line-height: 1;
+}
+#tabbar .tab.active {
+  color: #007aff;
+}
+#tabbar .tab:active {
+  background: #f0f0f3;
+}
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scroll-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.memory-group {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e5ea;
+}
+
+.memory-group h3 {
+  font-size: 14px;
+  color: #86868b;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.memory-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f3;
+  font-size: 14px;
+}
+.memory-item:last-child { border-bottom: none; }
+.memory-item .key { color: #86868b; }
+.memory-item .value { color: #1d1d1f; font-weight: 500; }
+/* ========== 记忆页 Tab ========== */
+.memory-tabs {
+  display: flex;
+  background: #fff;
+  border-bottom: 1px solid #e5e5ea;
+  flex-shrink: 0;
+}
+.memory-tab {
+  flex: 1;
+  padding: 12px 0;
+  background: transparent;
+  border: none;
+  color: #86868b;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+}
+.memory-tab.active {
+  color: #007aff;
+  border-bottom-color: #007aff;
+  font-weight: 500;
+}
+
+/* 折叠区（transient） */
+.memory-transient {
+  margin-top: 16px;
+  background: #fafafa;
+  border-radius: 12px;
+  border: 1px dashed #d2d2d7;
+}
+.memory-transient-header {
+  padding: 12px 16px;
+  font-size: 13px;
+  color: #86868b;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.memory-transient-body {
+  display: none;
+  padding: 0 16px 12px;
+}
+.memory-transient.expanded .memory-transient-body {
+  display: block;
+}
+.memory-transient .memory-item {
+  opacity: 0.7;
+}
+/* ========== 任务页 ========== */
+.task-subtabs {
+  display: flex;
+  background: #fff;
+  border-bottom: 1px solid #e5e5ea;
+  flex-shrink: 0;
+}
+.task-subtab {
+  flex: 1;
+  padding: 12px 0;
+  background: transparent;
+  border: none;
+  color: #86868b;
+  font-size: 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.task-subtab.active {
+  color: #007aff;
+  border-bottom-color: #007aff;
+  font-weight: 500;
+}
+
+.task-categories {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #f5f5f7;
+  overflow-x: auto;
+  flex-shrink: 0;
+  -webkit-overflow-scrolling: touch;
+}
+.task-categories::-webkit-scrollbar { display: none; }
+.cat-btn {
+  padding: 6px 14px;
+  background: #fff;
+  border: 1px solid #e5e5ea;
+  border-radius: 16px;
+  font-size: 13px;
+  color: #1d1d1f;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cat-btn.active {
+  background: #007aff;
+  color: #fff;
+  border-color: #007aff;
+}
+
+/* 任务卡片 */
+.task-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e5ea;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  transition: box-shadow 0.15s;
+}
+.task-card:active { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.task-card .task-icon {
+  font-size: 24px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.task-card .task-body { flex: 1; min-width: 0; }
+.task-card .task-name {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #1d1d1f;
+}
+.task-card .task-desc {
+  font-size: 13px;
+  color: #86868b;
+  line-height: 1.4;
+}
+.task-card .task-run-btn {
+  background: #007aff;
+  color: #fff;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.task-card .task-run-btn:active { background: #0066d6; }
+.task-card .task-run-btn:disabled { background: #b0b0b5; }
+
+/* 执行面板 */
+.task-run-panel {
+  display: none;
+  position: fixed;
+  bottom: 60px;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border-top: 1px solid #e5e5ea;
+  max-height: 60vh;
+  flex-direction: column;
+  z-index: 999;
+  box-shadow: 0 -4px 20px rgba(0,0,0,.08);
+}
+.task-run-panel.active { display: flex; }
+.task-run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e5e5ea;
+  font-weight: 600;
+  font-size: 15px;
+}
+.task-run-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* ========== 任务编辑弹窗 ========== */
+.task-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 10000;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.task-modal.active { display: flex; }
+
+.task-modal-content {
+  background: #fff;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.task-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e5ea;
+}
+.task-modal-header h2 { font-size: 16px; font-weight: 600; }
+
+.task-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-modal-body label {
+  font-size: 13px;
+  color: #86868b;
+  margin-top: 8px;
+}
+.task-modal-body input[type="text"],
+.task-modal-body textarea,
+.task-modal-body select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #d2d2d7;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.task-modal-body input:focus,
+.task-modal-body textarea:focus,
+.task-modal-body select:focus {
+  border-color: #007aff;
+}
+.task-modal-body textarea {
+  resize: vertical;
+  min-height: 100px;
+  line-height: 1.5;
+}
+
+.task-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #e5e5ea;
+}
+.btn-cancel, .btn-save {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+}
+.btn-cancel {
+  background: #f0f0f3;
+  color: #1d1d1f;
+}
+.btn-save {
+  background: #007aff;
+  color: #fff;
+  font-weight: 500;
+}
+.btn-save:disabled { background: #b0b0b5; cursor: not-allowed; }
+
+/* 任务卡片按钮组 */
+.task-card .task-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* 删除按钮：红底圆形 */
+.task-card .task-del-btn {
+  background: #fff0f0;
+  color: #ff3b30;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.task-card .task-del-btn:active {
+  background: #ffe0e0;
+}
+
+/* ========== 任务创建提示条 ========== */
+.task-draft-banner {
+  background: #fffbea;
+  border: 1px solid #f0d97a;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin: 0 auto 12px;
+  max-width: 900px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+.task-draft-banner button {
+  background: transparent;
+  border: 1px solid #d2a500;
+  color: #d2a500;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.task-draft-banner button:hover {
+  background: #f0d97a;
+  color: #fff;
+}
+
+/* ========== 任务页分组 ========== */
+.task-section {
+  margin-bottom: 24px;
+}
+.section-title {
+  font-size: 13px;
+  color: #86868b;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-bottom: 10px;
+  padding-left: 4px;
+}
+
+/* 执行记录卡片 */
+.run-item {
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  border: 1px solid #e5e5ea;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+.run-item:active { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.run-item .run-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.run-item .run-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.run-item .run-name {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-item .run-meta {
+  font-size: 11px;
+  color: #86868b;
+  white-space: nowrap;
+}
+.run-item .run-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #e6f4ea;
+  color: #1e8e3e;
+  white-space: nowrap;
+}
+.run-item .run-status.failed {
+  background: #fce8e6;
+  color: #c5221f;
+}
+.run-item .run-output {
+  display: none;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f3;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.run-item .run-output p { margin: 4px 0; }
+.run-item.expanded .run-output { display: block; }
+/* ========== 任务详情页 ========== */
+.task-detail-header {
+  background: #fff;
+  border-bottom: 1px solid #e5e5ea;
+  padding: 12px 12px 12px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.back-btn {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  color: #007aff;
+  cursor: pointer;
+  padding: 4px 8px;
+  line-height: 1;
+}
+.back-btn:active { opacity: 0.5; }
+
+.detail-run-btn {
+  background: #007aff;
+  color: #fff;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.detail-run-btn:active { background: #0066d6; }
+.detail-run-btn:disabled { background: #b0b0b5; }
+
+.chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+/* 详情页输入区样式跟聊天页一致（复用 .input-wrap / textarea） */
+#task-detail-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #d2d2d7;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+  max-height: 120px;
+}
+#task-detail-input:focus { border-color: #007aff; }
+
+#task-detail-send {
+  padding: 0 20px;
+  background: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 500;
+}
+#task-detail-send:hover { background: #0066d6; }
+/* ========== 任务详情 - 配置区 ========== */
+.task-config {
+  background: #fff;
+  padding: 4px 20px 12px;
+  border-bottom: 1px solid #e5e5ea;
+  flex-shrink: 0;
+}
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f3;
+}
+.config-row:last-child { border-bottom: none; }
+.config-label {
+  font-size: 14px;
+  color: #86868b;
+}
+.config-value {
+  font-size: 14px;
+  color: #1d1d1f;
+}
+.config-prompt {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  background: #f5f5f7;
+  padding: 10px 12px;
+  border-radius: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* iOS 风格的开关 */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 26px;
+  flex-shrink: 0;
+}
+.switch input { display: none; }
+.switch .slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: #d2d2d7;
+  border-radius: 26px;
+  transition: 0.2s;
+}
+.switch .slider::before {
+  content: "";
+  position: absolute;
+  height: 22px;
+  width: 22px;
+  left: 2px;
+  bottom: 2px;
+  background: #fff;
+  border-radius: 50%;
+  transition: 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+.switch input:checked + .slider {
+  background: #34c759;
+}
+.switch input:checked + .slider::before {
+  transform: translateX(18px);
+}
+/* ========== 三点菜单 ========== */
+.task-menu-btn {
+  background: transparent;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #86868b;
+  font-size: 20px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+.task-menu-btn:active { background: #f0f0f3; }
+
+.task-menu-dropdown {
+  position: fixed;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.15);
+  padding: 6px;
+  min-width: 140px;
+  z-index: 10001;
+  display: none;
+}
+.task-menu-dropdown.active { display: block; }
+.task-menu-item {
+  padding: 10px 14px;
+  font-size: 14px;
+  color: #1d1d1f;
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.task-menu-item:hover { background: #f5f5f7; }
+.task-menu-item.danger { color: #ff3b30; }
+.task-menu-item.danger:hover { background: #fff0f0; }
+
+.run-item .run-menu-btn {
+  background: transparent;
+  border: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #86868b;
+  font-size: 18px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  margin-left: 4px;
+}
+.run-item .run-menu-btn:active { background: #f0f0f3; }
+/* ========== 任务创建页 ========== */
+.create-blank {
+  flex: 1;
+  min-height: 30vh;
+}
+.create-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 16px;
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+.suggest-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: none;
+  padding: 14px 20px;
+  border-radius: 24px;
+  font-size: 14px;
+  color: #1d1d1f;
+  cursor: pointer;
+  text-align: left;
+  box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  transition: background .15s;
+  max-width: 100%;
+}
+.suggest-chip:active { background: #f0f0f3; }
+.suggest-chip span { font-size: 18px; }
+
+#task-create-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #d2d2d7;
+  border-radius: 10px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+  max-height: 120px;
+}
+#task-create-input:focus { border-color: #007aff; }
+
+#task-create-send {
+  padding: 0 20px;
+  background: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 500;
+}
+#task-create-send:disabled { background: #b0b0b5; cursor: not-allowed; }
 </style>
 
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.0/dist/purify.min.js"></script>
 </head>
 <body>
-
+<div id="app">
+<section id="page-chat" class="page active">
 <header>
   <div>
-    <h1>Agent Chat</h1>
-    <div class="meta">会话: <span id="sessionId">-</span></div>
-  </div>
-  <div style="display:flex;gap:8px;align-items:center;">
-    <select id="sessionSelect" style="padding:6px 10px;border:1px solid #d2d2d7;border-radius:6px;font-size:13px;max-width:260px;">
-      <option value="">— 选择会话 —</option>
-    </select>
-    <button onclick="newSession()">新会话</button>
+    <h1 id="chat-title">我的助理</h1>
+    <div class="meta" id="chat-subtitle" style="display:none;">会话: <span id="sessionId">-</span></div>
   </div>
 </header>
 <div id="chat"></div>
@@ -277,6 +1065,225 @@
     <button id="stop" onclick="stopGeneration()" style="display:none;background:#ff3b30;">停止</button>
   </div>
 </footer>
+
+</section>
+
+<!-- Today 页（占位） -->
+    <section id="page-today" class="page">
+      <header class="page-header"><h1>Today</h1></header>
+      <div class="placeholder">📅 今天该做什么 —— 开发中</div>
+    </section>
+
+<section id="page-tasks" class="page">
+  <header class="page-header">
+    <h1>任务</h1>
+    <button id="new-task-btn" style="background:#007aff;color:#fff;border:none;padding:6px 14px;border-radius:6px;font-size:13px;cursor:pointer;">+ 新建</button>
+  </header>
+
+  <!-- 子 Tab:任务 / 定时 -->
+  <div class="task-subtabs">
+    <button class="task-subtab active" data-trigger="manual">任务</button>
+    <button class="task-subtab" data-trigger="scheduled">定时</button>
+  </div>
+
+
+
+  <!-- 任务列表 -->
+  <div id="tasks-content" class="scroll-body">
+    <div class="placeholder">加载中…</div>
+  </div>
+
+  <!-- 执行结果弹窗 -->
+  <div id="task-run-panel" class="task-run-panel">
+    <div class="task-run-header">
+      <span id="task-run-title">执行结果</span>
+      <button onclick="closeTaskRunPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;">×</button>
+    </div>
+    <div id="task-run-output" class="task-run-output"></div>
+  </div>
+
+    <!-- 任务编辑弹窗 -->
+  <div id="task-modal" class="task-modal">
+    <div class="task-modal-content">
+      <div class="task-modal-header">
+        <h2 id="task-modal-title">新建任务</h2>
+        <button onclick="closeTaskModal()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#86868b;">×</button>
+      </div>
+      <div class="task-modal-body">
+        <input type="hidden" id="task-form-id">
+
+        <label>名称 *</label>
+        <input type="text" id="task-form-name" placeholder="例如：今日优先清单" maxlength="100">
+
+        <label>图标</label>
+        <input type="text" id="task-form-icon" placeholder="📋" maxlength="4" style="width:80px;">
+
+        <label>分类</label>
+        <select id="task-form-category">
+          <option value="general">通用</option>
+          <option value="work">工作</option>
+          <option value="life">生活</option>
+          <option value="learning">学习</option>
+          <option value="health">健康</option>
+        </select>
+
+        <label>说明</label>
+        <input type="text" id="task-form-description" placeholder="一句话说明这个任务做什么">
+
+        <label>Prompt（实际发给 Agent 的指令）*</label>
+        <textarea id="task-form-prompt" rows="5" placeholder="例如：请用 list_todos 查看所有未完成待办..."></textarea>
+
+        <label>可用工具（逗号分隔，留空 = 不限制）</label>
+        <input type="text" id="task-form-tools" placeholder="list_todos, get_current_time">
+      </div>
+      <div class="task-modal-footer">
+          <button onclick="closeTaskModal()" class="btn-cancel">取消</button>
+          <button onclick="deleteFromModal()" class="btn-cancel" style="color:#ff3b30;margin-left:auto;">删除</button>
+          <button onclick="saveTask()" class="btn-save" id="task-save-btn">保存</button>
+      </div>
+    </div>
+  </div>
+</section>
+<!-- 任务详情页 -->
+<section id="page-task-detail" class="page">
+  <header class="task-detail-header">
+    <button onclick="closeTaskDetail()" class="back-btn" title="返回">←</button>
+    <div style="flex:1;min-width:0;">
+      <h1 id="task-detail-title" style="font-size:16px;font-weight:600;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">任务</h1>
+      <div id="task-detail-subtitle" style="font-size:12px;color:#86868b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    </div>
+    <button onclick="runCurrentDetailTask()" class="detail-run-btn" title="执行任务">▶</button>
+  </header>
+  <!-- <div id="task-detail-config" class="task-config">
+  
+    <div class="config-row">
+      <span class="config-label">状态</span>
+      <label class="switch">
+        <input type="checkbox" id="detail-enabled-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="config-row" id="detail-schedule-row" style="display:none;">
+      <span class="config-label">执行时间</span>
+      <span class="config-value" id="detail-schedule-text" style="cursor:pointer;">
+        —
+      </span>
+    </div>
+
+    <div class="config-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="config-label">指令</span>
+        <span id="detail-prompt-edit-btn" style="color:#007aff;font-size:13px;cursor:pointer;">编辑</span>
+      </div>
+      <div id="detail-prompt-text" class="config-prompt"></div>
+    </div>
+  </div> -->
+  <div id="task-detail-messages" class="scroll-body chat-messages"></div>
+
+  <footer>
+    <div class="input-wrap">
+      <textarea id="task-detail-input" rows="1" placeholder="和任务助手对话…"></textarea>
+      <button id="task-detail-send" onclick="sendDetail()">发送</button>
+      <button id="task-detail-stop" onclick="stopDetail()" style="display:none;background:#ff3b30;">停止</button>
+    </div>
+  </footer>
+</section>
+
+<section id="page-scheduled-detail" class="page">
+  <header class="task-detail-header">
+    <button onclick="closeScheduledDetail()" class="back-btn" title="返回">←</button>
+    <div style="flex:1;min-width:0;">
+      <h1 id="sched-detail-title" style="font-size:16px;font-weight:600;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">任务</h1>
+      <div id="sched-detail-subtitle" style="font-size:12px;color:#86868b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></div>
+    </div>
+  </header>
+  <div class="task-config">
+    <div class="config-row">
+      <span class="config-label">状态</span>
+      <label class="switch">
+        <input type="checkbox" id="sched-enabled-toggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div class="config-row">
+      <span class="config-label">执行时间</span>
+      <span class="config-value" id="sched-schedule-text" style="cursor:pointer;">—</span>
+    </div>
+    <div class="config-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span class="config-label">指令</span>
+        <span id="sched-prompt-edit-btn" style="color:#007aff;font-size:13px;cursor:pointer;">编辑</span>
+      </div>
+      <div id="sched-prompt-text" class="config-prompt"></div>
+    </div>
+  </div>
+</section>
+<section id="page-task-create" class="page">
+  <header class="task-detail-header">
+    <button onclick="closeTaskCreate()" class="back-btn" style="font-size:22px;">✕</button>
+    <div style="flex:1;text-align:center;">
+      <h1 style="font-size:16px;font-weight:600;margin:0;">新任务</h1>
+    </div>
+    <div style="width:32px;"></div>
+  </header>
+
+  <!-- 消息区（初始隐藏） -->
+  <div id="task-create-messages" class="chat-messages" style="display:none;"></div>
+
+  <!-- 空白占位（用户还没输入时） -->
+  <div id="task-create-blank" class="create-blank"></div>
+
+  <!-- 预设提示词 -->
+  <div id="create-suggestions" class="create-suggestions">
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我准备即将参加的会议')">
+      <span>🖥</span> 帮我准备即将参加的会议
+    </button>
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我做一份市场调研')">
+      <span>📊</span> 帮我做一份市场调研
+    </button>
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我准备旅行行李清单')">
+      <span>🧳</span> 帮我准备旅行行李清单
+    </button>
+  </div>
+
+  <footer>
+    <div class="input-wrap">
+      <textarea id="task-create-input" rows="1" placeholder="点击输入或按住说话…"></textarea>
+      <button id="task-create-send" onclick="sendTaskCreate()">发送</button>
+    </div>
+  </footer>
+</section>
+    <!-- 记忆页（占位） -->
+   <section id="page-memory" class="page">
+  <header class="page-header">
+    <h1>记忆</h1>
+    <button id="refresh-memory" style="background:none;border:none;font-size:20px;cursor:pointer;">🔄</button>
+  </header>
+  <div class="memory-tabs">
+    <button class="memory-tab active" data-scope="user">关于我</button>
+    <button class="memory-tab" data-scope="agent">关于助手</button>
+  </div>
+  <div id="memory-content" class="scroll-body">
+    <div class="placeholder">加载中…</div>
+  </div>
+</section>
+    <!-- 设置页（占位） -->
+    <section id="page-settings" class="page">
+      <header class="page-header"><h1>设置</h1></header>
+      <div class="placeholder">⚙️ 设置 —— 开发中</div>
+    </section>
+  </div>
+
+  <!-- 底部 Tab 栏 -->
+  <nav id="tabbar">
+    <button class="tab active" data-tab="chat"><span>💬</span>聊天</button>
+    <button class="tab" data-tab="today"><span>📅</span>Today</button>
+    <button class="tab" data-tab="tasks"><span>✅</span>任务</button>
+    <button class="tab" data-tab="memory"><span>🧠</span>记忆</button>
+    <button class="tab" data-tab="settings"><span>⚙️</span>设置</button>
+  </nav>
+<div id="task-menu-dropdown" class="task-menu-dropdown"></div>
 <div id="lightbox" onclick="closeLightbox()">
   <img id="lightboxImg" src="" alt="">
   <div class="hint">点击任意处关闭</div>
@@ -285,12 +1292,17 @@
 
 <script>
 const API = "";  // 同源，留空
+const TOKEN_KEY = "agent_api_token";
+function getAuthHeaders() {
+  const t = localStorage.getItem(TOKEN_KEY) || "";
+  return t ? { "Authorization": "Bearer " + t } : {};
+}
 const CHAT_EL = document.getElementById("chat");
 const INPUT_EL = document.getElementById("input");
 const SEND_EL = document.getElementById("send");
 const META_EL = document.getElementById("sessionId");
 
-let sessionId = localStorage.getItem("agent_session_id") || genSessionId();
+let sessionId = localStorage.getItem("agent_session_id") || "main";
 localStorage.setItem("agent_session_id", sessionId);
 META_EL.textContent = sessionId;
 
@@ -405,7 +1417,7 @@ function clearImage() {
 }
 
 
-const SELECT_EL = document.getElementById("sessionSelect");
+
 
 function openLightbox(src) {
   const lb = document.getElementById("lightbox");
@@ -426,35 +1438,14 @@ document.addEventListener("click", (e) => {
   }
 });
 
-async function loadSessionList() {
-  try {
-    const r = await fetch(API + "/sessions");
-    if (!r.ok) return;
-    const list = await r.json();
-    SELECT_EL.innerHTML = '<option value="">— 选择会话 —</option>';
-    list.forEach(s => {
-      const opt = document.createElement("option");
-      opt.value = s.session_id;
-      opt.textContent = `${s.session_id}  (${s.updated_at.slice(5, 16)})`;
-      if (s.session_id === sessionId) opt.selected = true;
-      SELECT_EL.appendChild(opt);
-    });
-  } catch (e) {
-    console.error("加载会话列表失败", e);
-  }
-}
-// 切换会话
-SELECT_EL.addEventListener("change", async () => {
-  const sid = SELECT_EL.value;
-  if (!sid) return;
-  sessionId = sid;
-  localStorage.setItem("agent_session_id", sessionId);
-  META_EL.textContent = sessionId;
-  await loadHistory(sid);
-});
+
 
 async function loadHistory(sid) {
   CHAT_EL.innerHTML = "";
+  // 切到非任务会话时，清掉任务提示条
+  if (!sid.startsWith("task-")) {
+    document.getElementById("task-draft-banner")?.remove();
+  }
   try {
     const r = await fetch(API + `/sessions/${encodeURIComponent(sid)}/history`);
     if (!r.ok) return;
@@ -537,14 +1528,7 @@ function escapeHtml(s) {
     '"': "&quot;", "'": "&#39;",
   })[c]);
 }
-async function newSession() {
-  sessionId = genSessionId();
-  localStorage.setItem("agent_session_id", sessionId);
-  META_EL.textContent = sessionId;
-  CHAT_EL.innerHTML = "";
-  await loadSessionList();
-  SELECT_EL.value = sessionId;
-}
+
 function addMsg(role, text = "") {
   const wrap = document.createElement("div");
   wrap.className = "msg " + role;
@@ -675,7 +1659,28 @@ async function send() {
             tip.textContent = "（已中断）";
             aiBubble.appendChild(tip);
           }
-        } else if (evt.kind === "error") {
+        } else if (evt.kind === "tool_call") {
+          // 任务创建会话里，finalize_task 成功后隐藏提示条
+          if (evt.name === "finalize_task" && evt.success) {
+            const banner = document.getElementById("task-draft-banner");
+            if (banner) {
+              banner.style.background = "#e6f4ea";
+              banner.style.borderColor = "#34a853";
+              banner.innerHTML = `
+                <div>
+                  ✅ <strong>任务创建完成</strong>
+                  <br><span style="font-size:12px;color:#1e8e3e;">
+                    可在「任务」页查看和管理
+                  </span>
+                </div>
+              `;
+              // 3 秒后自动消失
+              setTimeout(() => banner.remove(), 3000);
+            }
+          }
+        }
+        
+        else if (evt.kind === "error") {
           aiBubble.textContent = "";
           aiBubble.innerHTML = `<span class="error">❌ ${evt.error}</span>`;
         }
@@ -697,7 +1702,7 @@ async function send() {
     SEND_EL.style.display = "block";
     STOP_EL.style.display = "none";
     INPUT_EL.focus();
-    loadSessionList().catch(() => {});
+
   }
 }
 
@@ -716,9 +1721,18 @@ INPUT_EL.addEventListener("input", () => {
 });
 // 初始化：加载会话列表 + 恢复当前会话历史
 (async () => {
-  await loadSessionList();
   if (sessionId) {
     await loadHistory(sessionId);
+  }
+  // 恢复上次的 tab
+  const savedTab = localStorage.getItem("agent_current_tab") || "chat";
+  // 注意：task-detail 和 scheduled-detail 不恢复（它们是二级页面，回来时该回任务页）
+  const validTabs = ["chat", "today", "tasks", "memory", "settings"];
+  if (validTabs.includes(savedTab)) {
+    switchTab(savedTab);
+    // 切到任务/记忆页时也要加载数据
+    if (savedTab === "tasks") loadTasks();
+    if (savedTab === "memory") loadMemories();
   }
 })();
 // marked 配置
@@ -729,6 +1743,1425 @@ marked.setOptions({
   mangle: false,       // 不混淆邮箱
 });
 INPUT_EL.focus();
+// ============ Tab 切换 ============
+function switchTab(tabName) {
+  document.querySelectorAll(".page").forEach((p) => {
+    p.classList.toggle("active", p.id === "page-" + tabName);
+  });
+  document.querySelectorAll("#tabbar .tab").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === tabName);
+  });
+  // 记录当前 tab
+  localStorage.setItem("agent_current_tab", tabName);
+
+  if (tabName === "chat") {
+    setTimeout(() => INPUT_EL.focus(), 100);
+  }
+}
+
+document.querySelectorAll("#tabbar .tab").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+// ============ Service Worker 注册 ============
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js")
+      .then((reg) => console.log("[PWA] SW 注册成功", reg.scope))
+      .catch((err) => console.warn("[PWA] SW 注册失败", err));
+  });
+}
+// ============ 记忆页面 ============
+// ============ 记忆页面 ============
+const CATEGORY_LABELS = {
+  // user 域
+  profile: "📋 基本",
+  work: "💼 工作",
+  lifestyle: "🏠 生活",
+  tools: "🔧 工具",
+  goals: "🎯 目标",
+  routine: "🔁 习惯",
+  // agent 域
+  character: "🎭 人设",
+  tone: "💬 语气",
+  constraints: "⛔ 约束",
+  // 兜底
+  general: "📌 其他",
+};
+
+let currentMemoryScope = "user";
+let memoryCache = null;
+
+async function loadMemories() {
+  const el = document.getElementById("memory-content");
+  el.innerHTML = '<div class="placeholder">加载中…</div>';
+
+  try {
+    const r = await fetch(API + "/memories", {
+      headers: { ...getAuthHeaders() },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    memoryCache = data.scopes || {};
+    renderMemories();
+  } catch (e) {
+    el.innerHTML = `<div class="placeholder">❌ 加载失败：${e.message}</div>`;
+  }
+}
+
+function renderMemories() {
+  const el = document.getElementById("memory-content");
+  const scopeData = (memoryCache || {})[currentMemoryScope] || {};
+
+  // 分离稳定 / 临时
+  const stable = {};      // { category: [items] }
+  const transient = [];   // [items]
+
+  for (const [cat, items] of Object.entries(scopeData)) {
+    for (const item of items) {
+      if (item.lifetime === "transient") {
+        transient.push(item);
+      } else {
+        stable[cat] = stable[cat] || [];
+        stable[cat].push(item);
+      }
+    }
+  }
+
+  // 空状态
+  if (Object.keys(stable).length === 0 && transient.length === 0) {
+    const hint = currentMemoryScope === "user"
+      ? '试着说："记住我在南京"'
+      : '试着说："以后你叫小林"';
+    el.innerHTML = `<div class="placeholder">🧠 还没有任何记忆<br><small>${hint}</small></div>`;
+    return;
+  }
+
+  el.innerHTML = "";
+
+  // 按固定顺序展示 category
+  const ORDER = ["profile", "work", "lifestyle", "tools", "goals", "routine",
+                 "character", "tone", "constraints", "general"];
+  const sorted = Object.keys(stable).sort((a, b) => {
+    const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+  });
+
+  for (const cat of sorted) {
+    const group = document.createElement("div");
+    group.className = "memory-group";
+    const label = CATEGORY_LABELS[cat] || `📁 ${cat}`;
+    group.innerHTML = `<h3>${label}</h3>`;
+
+    for (const item of stable[cat]) {
+      group.appendChild(buildMemoryItem(item));
+    }
+    el.appendChild(group);
+  }
+
+  // 临时区（折叠）
+  if (transient.length > 0) {
+    const transEl = document.createElement("div");
+    transEl.className = "memory-transient";
+    transEl.innerHTML = `
+      <div class="memory-transient-header">
+        <span>⏳ 临时（${transient.length}）</span>
+        <span style="font-size:11px;">点击展开 ▾</span>
+      </div>
+      <div class="memory-transient-body"></div>
+    `;
+    const body = transEl.querySelector(".memory-transient-body");
+    for (const item of transient) {
+      body.appendChild(buildMemoryItem(item));
+    }
+    transEl.querySelector(".memory-transient-header").addEventListener("click", () => {
+      transEl.classList.toggle("expanded");
+    });
+    el.appendChild(transEl);
+  }
+}
+
+function buildMemoryItem(item) {
+  const row = document.createElement("div");
+  row.className = "memory-item";
+  row.innerHTML = `
+    <span class="key">${escapeHtml(item.key)}</span>
+    <span class="value">${escapeHtml(item.value)}</span>
+  `;
+  // 点击可删除（简单版）
+  row.style.cursor = "pointer";
+  row.title = "点击删除";
+  row.addEventListener("click", async () => {
+    if (!confirm(`删除这条记忆？\n\n${item.key}: ${item.value}`)) return;
+    try {
+      const r = await fetch(API + `/memories/${item.id}`, {
+        method: "DELETE",
+        headers: { ...getAuthHeaders() },
+      });
+      if (r.ok) {
+        loadMemories();
+      } else {
+        alert("删除失败：" + await r.text());
+      }
+    } catch (e) {
+      alert("删除失败：" + e.message);
+    }
+  });
+  return row;
+}
+
+// Tab 切换
+document.querySelectorAll(".memory-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".memory-tab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentMemoryScope = btn.dataset.scope;
+    renderMemories();
+  });
+});
+
+// 切到"记忆"页面时自动加载
+document.querySelector('#tabbar .tab[data-tab="memory"]').addEventListener("click", loadMemories);
+document.getElementById("refresh-memory").addEventListener("click", loadMemories);
+
+// ============ 任务页 ============
+let currentTaskTrigger = "manual";
+// let currentTaskCategory = "";
+
+
+async function loadTasks() {
+  const el = document.getElementById("tasks-content");
+  el.innerHTML = '<div class="placeholder">加载中…</div>';
+
+  try {
+    if (currentTaskTrigger === "manual") {
+      await renderTaskTab(el);
+    } else {
+      await renderScheduledTab(el);
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="placeholder">❌ 加载失败：${e.message}</div>`;
+  }
+}
+
+// ─── 任务 Tab：今天 / 昨天 / 为你推荐 ───
+async function renderTaskTab(el) {
+  const r = await fetch(API + "/tasks?status=all", { headers: { ...getAuthHeaders() } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { tasks } = await r.json();
+
+  // 我的任务 = active 且非内置
+  const myTasks = tasks.filter((t) => !t.is_builtin && t.status === "active");
+  const recommended = tasks.filter((t) => t.is_builtin);
+
+  // 按 updated_at（UTC，跟 DB 一致）分组
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const yesterdayStr = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+  const cutoffStr = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+
+  const groups = { today: [], yesterday: [], recent: [] };
+  for (const t of myTasks) {
+    const d = (t.updated_at || t.created_at || "").slice(0, 10);
+    if (d === todayStr) groups.today.push(t);
+    else if (d === yesterdayStr) groups.yesterday.push(t);
+    else if (d >= cutoffStr) groups.recent.push(t);
+  }
+
+  el.innerHTML = "";
+
+  // 空状态
+  if (myTasks.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "task-section";
+    empty.innerHTML = `
+      <h2 class="section-title">我的任务</h2>
+      <div style="color:#86868b;font-size:13px;padding:8px 4px;line-height:1.6;">
+        还没有任务。点右上角"+ 新建"，或从下方"为你推荐"里选一个。
+      </div>
+    `;
+    el.appendChild(empty);
+  } else {
+    for (const [key, label] of [["today", "今天"], ["yesterday", "昨天"], ["recent", "近 7 天"]]) {
+      if (groups[key].length === 0) continue;
+      const section = document.createElement("div");
+      section.className = "task-section";
+      const title = document.createElement("h2");
+      title.className = "section-title";
+      title.textContent = label;
+      section.appendChild(title);
+      for (const t of groups[key]) {
+        section.appendChild(buildTaskCard(t));
+      }
+      el.appendChild(section);
+    }
+  }
+
+  // 为你推荐（随机 4 个）
+  const recSection = document.createElement("div");
+  recSection.className = "task-section";
+  const recTitle = document.createElement("h2");
+  recTitle.className = "section-title";
+  recTitle.textContent = "为你推荐";
+  recSection.appendChild(recTitle);
+
+  if (recommended.length === 0) {
+    const e = document.createElement("div");
+    e.style.cssText = "color:#c7c7cc;font-size:13px;padding:8px 4px;";
+    e.textContent = "（无）";
+    recSection.appendChild(e);
+  } else {
+    const shuffled = [...recommended].sort(() => Math.random() - 0.5);
+    const picked = shuffled.slice(0, 4);
+    for (const t of picked) {
+      recSection.appendChild(buildTaskCard(t));
+    }
+  }
+  el.appendChild(recSection);
+}
+
+// ─── 定时 Tab：进行中 / 为你推荐 ───
+async function renderScheduledTab(el) {
+  const r = await fetch(API + "/tasks?trigger_type=scheduled&status=all", {
+    headers: { ...getAuthHeaders() },
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { tasks } = await r.json();
+
+  // 按 enabled 分组
+  const active = tasks.filter((t) => t.enabled && t.status === "active");
+  const paused = tasks.filter((t) => !t.enabled || t.status !== "active");
+
+  el.innerHTML = "";
+
+  // ─── 进行中 ───
+  const activeSection = document.createElement("div");
+  activeSection.className = "task-section";
+  const activeTitle = document.createElement("h2");
+  activeTitle.className = "section-title";
+  activeTitle.textContent = "进行中";
+  activeSection.appendChild(activeTitle);
+
+  if (active.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "color:#86868b;font-size:13px;padding:8px 4px;";
+    empty.textContent = "还没有定时任务。在聊天里说「每天 8 点提醒我…」即可创建。";
+    activeSection.appendChild(empty);
+  } else {
+    for (const t of active) {
+      activeSection.appendChild(buildTaskCard(t, "scheduled"));
+    }
+  }
+  el.appendChild(activeSection);
+
+  // ─── 已暂停 ───
+  if (paused.length > 0) {
+    const pausedSection = document.createElement("div");
+    pausedSection.className = "task-section";
+    const pausedTitle = document.createElement("h2");
+    pausedTitle.className = "section-title";
+    pausedTitle.textContent = "已暂停";
+    pausedSection.appendChild(pausedTitle);
+
+    for (const t of paused) {
+      pausedSection.appendChild(buildTaskCard(t, "scheduled"));
+    }
+    el.appendChild(pausedSection);
+  }
+  // ─── 为你推荐 ───
+  const recSection = document.createElement("div");
+  recSection.className = "task-section";
+  const recTitle = document.createElement("h2");
+  recTitle.className = "section-title";
+  recTitle.textContent = "为你推荐";
+  recSection.appendChild(recTitle);
+
+  // 拉所有内置任务作为"定时模板"
+  try {
+    const allResp = await fetch(API + "/tasks", { headers: { ...getAuthHeaders() } });
+    if (allResp.ok) {
+      const { tasks: allTasks } = await allResp.json();
+      const builtin = allTasks.filter((t) => t.is_builtin);
+
+      if (builtin.length === 0) {
+        const hint = document.createElement("div");
+        hint.style.cssText = "color:#86868b;font-size:13px;padding:8px 4px;";
+        hint.textContent = "说一句「每天早上 8 点提醒我…」即可创建定时任务";
+        recSection.appendChild(hint);
+      } else {
+        for (const t of builtin) {
+          const shuffled = [...builtin].sort(() => Math.random() - 0.5);
+          const picked = shuffled.slice(0, 3);
+          for (const t of picked) {
+              recSection.appendChild(buildTaskCard(t, "manual"));
+          } 
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[scheduled] 加载推荐失败", e);
+  }
+
+  el.appendChild(recSection);
+
+}
+// ─── 构造：执行记录卡片 ───
+function buildRunSection(titleText, runs) {
+  const section = document.createElement("div");
+  section.className = "task-section";
+  const title = document.createElement("h2");
+  title.className = "section-title";
+  title.textContent = titleText;
+  section.appendChild(title);
+
+  if (runs.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.cssText = "color:#c7c7cc;font-size:13px;padding:8px 4px;";
+    empty.textContent = "（无）";
+    section.appendChild(empty);
+    return section;
+  }
+  for (const r of runs) {
+    section.appendChild(buildRunItem(r));
+  }
+  return section;
+}
+
+function buildRunItem(run) {
+  const el = document.createElement("div");
+  el.className = "run-item";
+
+  const time = (run.run_at || "").slice(11, 16);
+  const duration = run.duration_ms ? `${(run.duration_ms / 1000).toFixed(1)}s` : "";
+  const statusClass = run.status === "success" ? "" : "failed";
+  const statusText =
+    run.status === "success" ? "成功" :
+    run.status === "failed" ? "失败" : "运行中";
+
+  el.innerHTML = `
+    <div class="run-header">
+      <span class="run-icon">${escapeHtml(run.task_icon || "📋")}</span>
+      <span class="run-name">${escapeHtml(run.task_name || "(已删除任务)")}</span>
+      <span class="run-meta">${time} · ${duration}</span>
+      <span class="run-status ${statusClass}">${statusText}</span>
+      <button class="run-menu-btn" title="更多">⋯</button>
+    </div>
+  `;
+
+  // 点 ⋯ → 菜单
+  const menuBtn = el.querySelector(".run-menu-btn");
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showRunMenu(e, run);
+  });
+
+  // 点本体 → 进会话页
+  if (run.task_id) {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", async () => {
+      try {
+        const allResp = await fetch(API + "/tasks?status=all", {
+          headers: { ...getAuthHeaders() },
+        });
+        let task = null;
+        if (allResp.ok) {
+          const allData = await allResp.json();
+          task = (allData.tasks || []).find((t) => t.id === run.task_id);
+        }
+        if (!task) {
+          task = {
+            id: run.task_id,
+            name: run.task_name || "任务",
+            icon: run.task_icon || "📋",
+            prompt: "",
+            description: "",
+            trigger_type: "manual",
+            enabled: 0,
+          };
+        }
+        openTaskSession(task);
+      } catch (e) {
+        alert("打开会话失败：" + e.message);
+      }
+    });
+  }
+
+  return el;
+}
+
+// runs 的 ⋯ 菜单
+function showRunMenu(event, run) {
+  const dropdown = document.getElementById("task-menu-dropdown");
+  const items = [
+    { label: "删除记录", danger: true, action: () => deleteRunRecord(run.id) },
+  ];
+  dropdown.innerHTML = items.map((it, i) =>
+    `<div class="task-menu-item ${it.danger ? "danger" : ""}" data-idx="${i}">${escapeHtml(it.label)}</div>`
+  ).join("");
+
+  const rect = event.currentTarget.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + 4) + "px";
+  dropdown.style.right = (window.innerWidth - rect.right) + "px";
+  dropdown.style.left = "auto";
+  dropdown.classList.add("active");
+
+  dropdown.querySelectorAll(".task-menu-item").forEach((el, i) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      hideTaskMenu();
+      items[i].action();
+    });
+  });
+}
+
+async function deleteRunRecord(runId) {
+  if (!confirm("删除这条执行记录？")) return;
+  try {
+    const r = await fetch(API + `/task-runs/${runId}`, {
+      method: "DELETE",
+      headers: { ...getAuthHeaders() },
+    });
+    if (!r.ok) {
+      alert("删除失败：" + (await r.text()));
+      return;
+    }
+    await loadTasks();
+  } catch (e) {
+    alert("删除失败：" + e.message);
+  }
+}
+
+// ─── 构造：任务卡片（可执行 / 可删除 / 可编辑） ───
+function buildTaskCard(t, mode) {
+  const card = document.createElement("div");
+  card.className = "task-card";
+
+  if (mode === "scheduled" && !t.enabled) {
+    card.style.opacity = "0.6";
+  }
+
+  card.innerHTML = `
+    <div class="task-icon">${escapeHtml(t.icon)}</div>
+    <div class="task-body">
+      <div class="task-name">
+        ${escapeHtml(t.name)}
+        ${mode === "scheduled" && t.schedule
+          ? `<span style="font-size:11px;color:#86868b;margin-left:6px;">${escapeHtml(_humanCron(t.schedule))}</span>`
+          : ""}
+      </div>
+      <div class="task-desc">${escapeHtml(t.description || t.prompt.slice(0, 50))}</div>
+    </div>
+    <button class="task-menu-btn" title="更多">⋯</button>
+  `;
+
+  // 三点菜单
+  const menuBtn = card.querySelector(".task-menu-btn");
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showTaskMenu(e, t, mode);
+  });
+
+  // 点卡片本体 → 分两种：
+  // - scheduled 模式（定时 Tab）→ 配置页
+  // - 其他（任务 Tab）→ 会话页
+  card.addEventListener("click", () => {
+    if (mode === "scheduled") {
+      openScheduledDetail(t);
+    } else {
+      openTaskSession(t);
+    }
+  });
+
+  return card;
+}
+
+// cron → 人话（前端副本，仅展示用）
+function _humanCron(expr) {
+  if (!expr) return "";
+  const p = expr.split(" ");
+  if (p.length !== 5) return expr;
+  const [mi, hr, dom, mon, dow] = p;
+
+  if (dom === "*" && mon === "*" && dow === "*" && mi !== "*" && hr !== "*") {
+    return `每天 ${hr.padStart(2, "0")}:${mi.padStart(2, "0")}`;
+  }
+  if (dom === "*" && mon === "*" && dow !== "*" && mi !== "*" && hr !== "*") {
+    const names = ["日", "一", "二", "三", "四", "五", "六"];
+    return `每周${names[parseInt(dow)] || dow} ${hr.padStart(2, "0")}:${mi.padStart(2, "0")}`;
+  }
+  if (dom !== "*" && mon === "*" && dow === "*" && mi !== "*" && hr !== "*") {
+    return `每月 ${dom} 号 ${hr.padStart(2, "0")}:${mi.padStart(2, "0")}`;
+  }
+  return expr;
+}
+
+// function renderTasks() {
+//   const el = document.getElementById("tasks-content");
+
+//   if (tasksCache.length === 0) {
+//     el.innerHTML = '<div class="placeholder">暂无任务<br><small>点右上角"+ 新建"创建</small></div>';
+//     return;
+//   }
+
+//   el.innerHTML = "";
+//   for (const t of tasksCache) {
+//     const card = document.createElement("div");
+//     card.className = "task-card";
+
+//     // 内置任务不显示删除按钮
+//     const delBtnHTML = t.is_builtin
+//       ? ""
+//       : `<button class="task-del-btn" title="删除">×</button>`;
+
+//     card.innerHTML = `
+//       <div class="task-icon">${escapeHtml(t.icon)}</div>
+//       <div class="task-body">
+//         <div class="task-name">${escapeHtml(t.name)}</div>
+//         <div class="task-desc">${escapeHtml(t.description || t.prompt.slice(0, 50))}</div>
+//       </div>
+//       <button class="task-run-btn" title="执行">▶</button>
+//       ${delBtnHTML}
+//     `;
+
+//     // ▶ 执行
+//     const runBtn = card.querySelector(".task-run-btn");
+//     runBtn.addEventListener("click", (e) => {
+//       e.stopPropagation();
+//       runTask(t.id, t.name, runBtn);
+//     });
+
+//     // × 删除
+//     const delBtn = card.querySelector(".task-del-btn");
+//     if (delBtn) {
+//       delBtn.addEventListener("click", (e) => {
+//         e.stopPropagation();
+//         deleteTask(t.id, t.name);
+//       });
+//     }
+
+//     // 点卡片本体 → 编辑
+//     card.addEventListener("click", () => {
+//       openTaskModal(t);
+//     });
+
+//     el.appendChild(card);
+//   }
+// }
+
+async function runTask(taskId, taskName, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+
+  const panel = document.getElementById("task-run-panel");
+  const title = document.getElementById("task-run-title");
+  const output = document.getElementById("task-run-output");
+  panel.classList.add("active");
+  title.textContent = taskName;
+  output.textContent = "执行中…";
+
+  try {
+    const r = await fetch(API + `/tasks/${taskId}/run`, {
+      method: "POST",
+      headers: { ...getAuthHeaders() },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}: ${await r.text()}`);
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (!raw.startsWith("data: ")) continue;
+        try {
+          const evt = JSON.parse(raw.slice(6));
+          if (evt.kind === "content") {
+            content += evt.text;
+            output.textContent = content;
+            output.scrollTop = output.scrollHeight;
+          } else if (evt.kind === "error") {
+            output.textContent = "❌ " + evt.error;
+          }
+        } catch { continue; }
+      }
+    }
+    // 最终 Markdown 渲染
+    output.innerHTML = DOMPurify.sanitize(marked.parse(content));
+  } catch (e) {
+    output.textContent = "❌ " + e.message;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "▶"; }
+  }
+}
+
+function closeTaskRunPanel() {
+  document.getElementById("task-run-panel").classList.remove("active");
+}
+
+// 子 Tab 切换
+document.querySelectorAll(".task-subtab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".task-subtab").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentTaskTrigger = btn.dataset.trigger;
+    loadTasks();
+  });
+});
+
+
+// 切到"任务"页时加载
+document.querySelector('#tabbar .tab[data-tab="tasks"]').addEventListener("click", loadTasks);
+
+
+// ============ 任务编辑弹窗 ============
+const TASK_MODAL = document.getElementById("task-modal");
+
+function openTaskModal(task) {
+  document.getElementById("task-modal-title").textContent = task ? "编辑任务" : "新建任务";
+  document.getElementById("task-form-id").value = task ? task.id : "";
+  document.getElementById("task-form-name").value = task ? task.name : "";
+  document.getElementById("task-form-icon").value = task ? task.icon : "📋";
+  document.getElementById("task-form-category").value = task ? task.category : "general";
+  document.getElementById("task-form-description").value = task ? task.description : "";
+  document.getElementById("task-form-prompt").value = task ? task.prompt : "";
+  document.getElementById("task-form-tools").value =
+    task && task.tools && task.tools.length ? task.tools.join(", ") : "";
+
+  TASK_MODAL.classList.add("active");
+  setTimeout(() => document.getElementById("task-form-name").focus(), 100);
+}
+
+function closeTaskModal() {
+  TASK_MODAL.classList.remove("active");
+}
+function deleteFromModal() {
+  const id = document.getElementById("task-form-id").value;
+  const name = document.getElementById("task-form-name").value;
+  if (!id) return;   // 新建模式，没有可删的
+  closeTaskModal();
+  deleteTask(parseInt(id), name);
+}
+async function saveTask() {
+  const id = document.getElementById("task-form-id").value;
+  const name = document.getElementById("task-form-name").value.trim();
+  const prompt = document.getElementById("task-form-prompt").value.trim();
+  const icon = document.getElementById("task-form-icon").value.trim() || "📋";
+  const description = document.getElementById("task-form-description").value.trim();
+  const category = document.getElementById("task-form-category").value;
+  const toolsStr = document.getElementById("task-form-tools").value.trim();
+  const tools = toolsStr
+    ? toolsStr.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  if (!name) { alert("名称不能为空"); return; }
+  if (!prompt) { alert("Prompt 不能为空"); return; }
+
+  const btn = document.getElementById("task-save-btn");
+  btn.disabled = true;
+  btn.textContent = "保存中…";
+
+  const body = { name, prompt, icon, description, category, tools };
+
+  try {
+    let r;
+    if (id) {
+      // 编辑：PATCH
+      r = await fetch(API + `/tasks/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+    } else {
+      // 新建：POST
+      r = await fetch(API + "/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+        body: JSON.stringify(body),
+      });
+    }
+
+    if (!r.ok) {
+      const err = await r.text();
+      throw new Error(err);
+    }
+
+    closeTaskModal();
+    await loadTasks();
+  } catch (e) {
+    alert("保存失败：" + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "保存";
+  }
+}
+
+async function deleteTask(taskId, taskName) {
+  if (!confirm(`删除任务「${taskName}」？`)) return;
+
+  try {
+    const r = await fetch(API + `/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: { ...getAuthHeaders() },
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ detail: "删除失败" }));
+      alert(err.detail || "删除失败");
+      return;
+    }
+    await loadTasks();
+  } catch (e) {
+    alert("删除失败：" + e.message);
+  }
+}
+
+// ESC 关闭
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTaskModal();
+});
+
+// 点遮罩关闭
+TASK_MODAL.addEventListener("click", (e) => {
+  if (e.target === TASK_MODAL) closeTaskModal();
+});
+// "新建"按钮
+document.getElementById("new-task-btn").addEventListener("click", async () => {
+  try {
+    const r = await fetch(API + "/tasks/draft", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ category: "general" }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const { id } = await r.json();
+    openTaskCreate(id);   // ← 进独立创建页
+  } catch (e) {
+    alert("创建任务失败：" + e.message);
+  }
+});
+
+// 任务创建提示条
+function showTaskDraftBanner(taskId) {
+  // 移除旧的
+  const old = document.getElementById("task-draft-banner");
+  if (old) old.remove();
+
+  const banner = document.createElement("div");
+  banner.id = "task-draft-banner";
+  banner.className = "task-draft-banner";
+  banner.innerHTML = `
+    <div>
+      ✏️ <strong>正在创建任务 #${taskId}</strong>
+      <br><span style="font-size:12px;color:#6e6e73;">
+        告诉我你想要什么任务，我会帮你完善。比如："每天早上 8 点看日程"
+      </span>
+    </div>
+    <button onclick="cancelTaskDraft(${taskId})">取消</button>
+  `;
+  CHAT_EL.appendChild(banner);
+}
+
+async function cancelTaskDraft(taskId) {
+  if (!confirm("取消创建这个任务？")) return;
+  try {
+    // 用 API 删除任务（后端 PATCH/删除都支持）
+    await fetch(API + `/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: { ...getAuthHeaders() },
+    });
+  } catch (e) { /* 忽略 */ }
+
+  // 切回主聊天
+  sessionId = "main";
+  localStorage.setItem("agent_session_id", sessionId);
+  META_EL.textContent = sessionId;
+  document.getElementById("task-draft-banner")?.remove();
+  await loadHistory("main");
+
+}
+// ============ 任务详情页 ============
+let currentDetailTaskId = null;
+let currentDetailSessionId = null;
+let currentDetailTask = null;
+let detailAbort = null;
+let detailBusy = false;
+
+async function openTaskSession(task) {
+  currentDetailTaskId = task.id;
+  currentDetailTask = task;
+  // 判断：内置任务（推荐）→ 每次新会话；用户创建的任务 → 复用 task-{id}
+  const isBuiltin = !!task.is_builtin;
+  let sid;
+  if (isBuiltin) {
+    // 内置任务：用时间戳生成新会话，只有发消息时才真正创建
+    sid = `task-${task.id}-${Date.now()}`;
+    currentDetailSessionId = sid;   // 临时记下
+  } else {
+    sid = `task-${task.id}`;
+    currentDetailSessionId = sid;
+  }
+  document.getElementById("task-detail-title").textContent =
+    (task.icon || "") + " " + task.name;
+  document.getElementById("task-detail-subtitle").textContent =
+    task.description || "";
+
+  const messagesEl = document.getElementById("task-detail-messages");
+  messagesEl.innerHTML = '<div class="placeholder" style="padding-top:40px;">加载中…</div>';
+
+  // 预设 prompt 到输入框（用户可自由修改）
+  // 只有"为你推荐"（内置模板）才预填 prompt
+  // 已创建的任务：输入框留空，等用户新输入
+  const inputEl = document.getElementById("task-detail-input");
+  if (isBuiltin) {
+    inputEl.value = task.prompt || "";
+    inputEl.style.height = "auto";
+    setTimeout(() => {
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
+    }, 0);
+  } else {
+    inputEl.value = "";
+    inputEl.style.height = "auto";
+  }
+  switchTab("task-detail");
+
+  // 内置任务（推荐）：不加载历史（新会话）
+  if (isBuiltin) {
+    messagesEl.innerHTML = "";
+    return;   // 提前返回
+  }
+
+  // 用户任务：加载历史
+  try {
+    const r = await fetch(API + `/sessions/${encodeURIComponent(sid)}/history`, {
+      headers: { ...getAuthHeaders() },
+    });
+    messagesEl.innerHTML = "";
+    if (!r.ok) {
+      if (r.status === 404) return;
+      throw new Error(`HTTP ${r.status}`);
+    }
+    const data = await r.json();
+    (data.messages || []).forEach((m) => renderDetailMessage(m));
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  } catch (e) {
+    messagesEl.innerHTML = `<div class="placeholder" style="padding-top:40px;">❌ 加载失败：${escapeHtml(e.message)}</div>`;
+  }
+
+  setTimeout(() => document.getElementById("task-detail-input").focus(), 100);
+}
+
+
+
+
+
+function closeTaskDetail() {
+  currentDetailTaskId = null;
+  currentDetailTask = null;
+  switchTab("tasks");
+}
+
+function renderDetailMessage(m) {
+  const messagesEl = document.getElementById("task-detail-messages");
+  const role = m.role === "user" ? "user" : "assistant";
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  wrap.innerHTML = `
+    <div class="avatar">${role === "user" ? "你" : "AI"}</div>
+    <div class="bubble"></div>
+  `;
+  const bubble = wrap.querySelector(".bubble");
+  if (role === "assistant") {
+    bubble.innerHTML = DOMPurify.sanitize(marked.parse(m.content || ""));
+    if (m.interrupted) {
+      const tip = document.createElement("div");
+      tip.style.cssText = "color:#86868b;font-size:12px;margin-top:6px;";
+      tip.textContent = "（已中断）";
+      bubble.appendChild(tip);
+    }
+        // 耗时显示
+    if (m.elapsed_ms != null) {
+      const meta = document.createElement("div");
+      meta.className = "elapsed";
+      let html = `⏱ ${formatMs(m.elapsed_ms)}`;
+      if (m.ttft_ms != null) {
+        html += `<span class="sep">·</span>首字 ${formatMs(m.ttft_ms)}`;
+      }
+      meta.innerHTML = html;
+      wrap.appendChild(meta);
+    }
+
+
+  } else {
+    bubble.textContent = m.content || "";
+  }
+  messagesEl.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return { wrap, bubble };
+}
+
+async function sendDetail() {
+  if (detailBusy) return;
+  const input = document.getElementById("task-detail-input");
+  const text = input.value.trim();
+  if (!text) return;
+
+  detailBusy = true;
+  const sendBtn = document.getElementById("task-detail-send");
+  const stopBtn = document.getElementById("task-detail-stop");
+  sendBtn.style.display = "none";
+  stopBtn.style.display = "block";
+  detailAbort = new AbortController();
+  input.value = "";
+  input.style.height = "auto";
+
+  const messagesEl = document.getElementById("task-detail-messages");
+  // 清掉占位符
+  messagesEl.querySelector(".placeholder")?.remove();
+
+  // 追加用户消息
+  renderDetailMessage({ role: "user", content: text });
+
+  // 追加 AI 空消息
+  const aiWrap = document.createElement("div");
+  aiWrap.className = "msg assistant";
+  aiWrap.innerHTML = `
+    <div class="avatar">AI</div>
+    <div class="bubble cursor"></div>
+  `;
+  const aiBubble = aiWrap.querySelector(".bubble");
+  messagesEl.appendChild(aiWrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const sid = currentDetailSessionId || `task-${currentDetailTaskId}`;
+
+  try {
+    const resp = await fetch(API + "/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ session_id: sid, message: text }),
+      signal: detailAbort.signal,
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (!raw.startsWith("data: ")) continue;
+        let evt;
+        try { evt = JSON.parse(raw.slice(6)); } catch { continue; }
+        if (evt.kind === "content") {
+          aiBubble.textContent += evt.text;
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+        } else if (evt.kind === "done") {
+          aiBubble.classList.remove("cursor");
+          aiBubble.innerHTML = DOMPurify.sanitize(marked.parse(aiBubble.textContent || evt.reply || ""));
+          // ← 新增：显示耗时
+          if (evt.elapsed_ms != null) {
+            const meta = document.createElement("div");
+            meta.className = "elapsed";
+            let html = `⏱ ${formatMs(evt.elapsed_ms)}`;
+            if (evt.ttft_ms != null) {
+              html += `<span class="sep">·</span>首字 ${formatMs(evt.ttft_ms)}`;
+            }
+            meta.innerHTML = html;
+            aiWrap.appendChild(meta);
+          }
+        }
+        else if (evt.kind === "error") {
+          aiBubble.classList.remove("cursor");
+          aiBubble.innerHTML = `<span class="error">❌ ${escapeHtml(evt.error)}</span>`;
+        }
+      }
+    }
+  } catch (e) {
+    aiBubble.classList.remove("cursor");
+    if (e.name !== "AbortError") {
+      aiBubble.innerHTML = `<span class="error">❌ ${escapeHtml(e.message)}</span>`;
+    }
+  } finally {
+    detailBusy = false;
+    detailAbort = null;
+    sendBtn.style.display = "block";
+    stopBtn.style.display = "none";
+    input.focus();
+  }
+}
+
+async function stopDetail() {
+  if (detailAbort) detailAbort.abort();
+  try {
+    await fetch(API + "/chat/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ session_id: currentDetailSessionId || `task-${currentDetailTaskId}` }),
+    });
+  } catch (e) { /* 忽略 */ }
+}
+
+async function runCurrentDetailTask() {
+  if (!currentDetailTask) return;
+  const btn = document.querySelector(".detail-run-btn");
+  if (btn) { btn.disabled = true; btn.textContent = "…"; }
+  try {
+    // 把执行结果作为一条 user 消息注入，让 Agent 在详情会话里跑
+    const input = document.getElementById("task-detail-input");
+    input.value = currentDetailTask.prompt;
+    await sendDetail();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "▶"; }
+  }
+}
+
+// ============ 定时任务配置页 ============
+let currentSchedTask = null;
+
+function openScheduledDetail(task) {
+  currentSchedTask = task;
+  document.getElementById("sched-detail-title").textContent =
+    (task.icon || "") + " " + task.name;
+  document.getElementById("sched-detail-subtitle").textContent =
+    task.description || "";
+  renderScheduledConfig(task);
+  switchTab("scheduled-detail");
+}
+
+function closeScheduledDetail() {
+  currentSchedTask = null;
+  switchTab("tasks");
+}
+
+function renderScheduledConfig(task) {
+  // 状态开关
+  const toggle = document.getElementById("sched-enabled-toggle");
+  toggle.checked = !!task.enabled;
+  toggle.onchange = async () => {
+    const ok = await updateScheduledField(task.id, { enabled: toggle.checked ? 1 : 0 });
+    if (ok) task.enabled = toggle.checked ? 1 : 0;
+  };
+
+  // 执行时间（不管是不是 scheduled 都显示）
+  const schedText = document.getElementById("sched-schedule-text");
+  if (task.schedule) {
+    schedText.textContent = _humanCron(task.schedule) + "  ›";
+  } else {
+    schedText.textContent = "未设置（点击添加）  ›";
+  }
+  schedText.onclick = () => editScheduledCron(task);
+
+  // 指令
+  document.getElementById("sched-prompt-text").textContent = task.prompt || "（无）";
+  document.getElementById("sched-prompt-edit-btn").onclick = () => editScheduledPrompt(task);
+}
+
+async function updateScheduledField(taskId, fields) {
+  try {
+    const r = await fetch(API + `/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify(fields),
+    });
+    if (!r.ok) {
+      alert("更新失败：" + (await r.text()));
+      return false;
+    }
+    return true;
+  } catch (e) {
+    alert("更新失败：" + e.message);
+    return false;
+  }
+}
+
+async function editScheduledCron(task) {
+  const presets = [
+    "0 8 * * *    每天 08:00",
+    "0 9 * * *    每天 09:00",
+    "0 22 * * *   每天 22:00",
+    "0 9 * * 1    每周一 09:00",
+    "0 9 1 * *    每月 1 号 09:00",
+  ].join("\n");
+
+  const newCron = prompt(
+    `编辑执行时间（cron 表达式，5 段：分 时 日 月 周）\n\n常用：\n${presets}\n\n当前：${task.schedule || "无"}`,
+    task.schedule || "0 9 * * *"
+  );
+  if (newCron === null) return;
+  const trimmed = newCron.trim();
+  if (!trimmed || trimmed === task.schedule) return;
+  // 改 schedule 时，同时把 trigger_type 设为 scheduled
+  const ok = await updateScheduledField(task.id, {
+    schedule: trimmed,
+    trigger_type: "scheduled",
+  });
+  if (ok) {
+    task.schedule = trimmed;
+    task.trigger_type = "scheduled";
+    document.getElementById("sched-schedule-text").textContent =
+      _humanCron(trimmed) + "  ›";
+  }
+}
+
+async function editScheduledPrompt(task) {
+  const newPrompt = prompt("编辑任务指令：", task.prompt || "");
+  if (newPrompt === null || newPrompt.trim() === task.prompt) return;
+  const ok = await updateScheduledField(task.id, { prompt: newPrompt.trim() });
+  if (ok) {
+    task.prompt = newPrompt.trim();
+    document.getElementById("sched-prompt-text").textContent = newPrompt.trim();
+  }
+}
+
+// ============ 三点菜单 ============
+let _menuCurrentTask = null;
+
+function showTaskMenu(event, task, mode) {
+  const dropdown = document.getElementById("task-menu-dropdown");
+  _menuCurrentTask = task;
+
+  const items = [];
+
+  // 非内置任务：可删除
+  if (!task.is_builtin) {
+    items.push({ label: "删除", danger: true, action: () => deleteTask(task.id, task.name) });
+  }
+
+  // scheduled 任务：可暂停/启用
+  if (task.trigger_type === "scheduled") {
+    if (task.enabled) {
+      items.push({ label: "暂停", action: () => toggleTaskEnabled(task.id, 0) });
+    } else {
+      items.push({ label: "启用", action: () => toggleTaskEnabled(task.id, 1) });
+    }
+  }
+
+  if (items.length === 0) {
+    items.push({ label: "无操作", action: () => {} });
+  }
+
+  dropdown.innerHTML = items.map((it, i) =>
+    `<div class="task-menu-item ${it.danger ? "danger" : ""}" data-idx="${i}">${escapeHtml(it.label)}</div>`
+  ).join("");
+
+  // 定位
+  const rect = event.currentTarget.getBoundingClientRect();
+  dropdown.style.top = (rect.bottom + 4) + "px";
+  dropdown.style.right = (window.innerWidth - rect.right) + "px";
+  dropdown.style.left = "auto";
+  dropdown.classList.add("active");
+
+  // 绑定动作
+  dropdown.querySelectorAll(".task-menu-item").forEach((el, i) => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      hideTaskMenu();
+      items[i].action();
+    });
+  });
+}
+
+function hideTaskMenu() {
+  document.getElementById("task-menu-dropdown").classList.remove("active");
+  _menuCurrentTask = null;
+}
+
+// 点其他位置关闭
+document.addEventListener("click", () => hideTaskMenu());
+
+async function toggleTaskEnabled(taskId, enabled) {
+  try {
+    const r = await fetch(API + `/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!r.ok) {
+      alert("更新失败：" + (await r.text()));
+      return;
+    }
+    await loadTasks();
+  } catch (e) {
+    alert("更新失败：" + e.message);
+  }
+}
+// ============ 任务创建页 ============
+let currentCreateDraftId = null;
+let createBusy = false;
+let createHasSentMsg = false;
+
+function openTaskCreate(draftId) {
+  currentCreateDraftId = draftId;
+  createHasSentMsg = false;
+  createBusy = false;
+
+  document.getElementById("task-create-input").value = "";
+  document.getElementById("task-create-input").style.height = "auto";
+  document.getElementById("task-create-messages").innerHTML = "";
+  document.getElementById("task-create-messages").style.display = "none";
+  document.getElementById("task-create-blank").style.display = "block";
+  document.getElementById("create-suggestions").style.display = "flex";
+  document.getElementById("create-suggestions").innerHTML = `
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我准备即将参加的会议')">
+      <span>🖥</span> 帮我准备即将参加的会议
+    </button>
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我做一份市场调研')">
+      <span>📊</span> 帮我做一份市场调研
+    </button>
+    <button class="suggest-chip" onclick="fillTaskCreate('帮我准备旅行行李清单')">
+      <span>🧳</span> 帮我准备旅行行李清单
+    </button>
+  `;
+  document.getElementById("task-create-send").disabled = false;
+
+  switchTab("task-create");
+  setTimeout(() => document.getElementById("task-create-input").focus(), 100);
+}
+
+function closeTaskCreate() {
+  // 没发过消息就删除 draft
+  if (currentCreateDraftId && !createHasSentMsg) {
+    fetch(API + `/tasks/${currentCreateDraftId}`, {
+      method: "DELETE",
+      headers: { ...getAuthHeaders() },
+    }).catch(() => {});
+  }
+  currentCreateDraftId = null;
+  switchTab("tasks");
+  loadTasks();
+}
+
+function fillTaskCreate(text) {
+  const input = document.getElementById("task-create-input");
+  input.value = text;
+  input.focus();
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 120) + "px";
+}
+
+function appendCreateMsg(role, text) {
+  const messagesEl = document.getElementById("task-create-messages");
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + role;
+  wrap.innerHTML = `
+    <div class="avatar">${role === "user" ? "你" : "AI"}</div>
+    <div class="bubble"></div>
+  `;
+  const bubble = wrap.querySelector(".bubble");
+  if (text) {
+    if (role === "user") bubble.textContent = text;
+    else bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
+  }
+  messagesEl.appendChild(wrap);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return bubble;
+}
+
+async function sendTaskCreate() {
+  if (createBusy || !currentCreateDraftId) return;
+  const input = document.getElementById("task-create-input");
+  const text = input.value.trim();
+  if (!text) return;
+
+  createBusy = true;
+  createHasSentMsg = true;
+  input.value = "";
+  input.style.height = "auto";
+
+  // 切换到消息视图
+  document.getElementById("task-create-blank").style.display = "none";
+  document.getElementById("create-suggestions").style.display = "none";
+  document.getElementById("task-create-messages").style.display = "flex";
+
+  appendCreateMsg("user", text);
+  const aiBubble = appendCreateMsg("assistant", "");
+  aiBubble.classList.add("cursor");
+
+  const sendBtn = document.getElementById("task-create-send");
+  sendBtn.disabled = true;
+
+  const sid = `task-${currentCreateDraftId}`;
+  let content = "";
+  let finalized = false;
+
+  try {
+    const resp = await fetch(API + "/chat/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ session_id: sid, message: text }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (!raw.startsWith("data: ")) continue;
+        let evt;
+        try { evt = JSON.parse(raw.slice(6)); } catch { continue; }
+        if (evt.kind === "content") {
+          content += evt.text;
+          aiBubble.textContent = content;
+          document.getElementById("task-create-messages").scrollTop = 999999;
+        } else if (evt.kind === "tool_call") {
+          if (evt.name === "finalize_task" && evt.success) finalized = true;
+        } else if (evt.kind === "done") {
+          aiBubble.classList.remove("cursor");
+          aiBubble.innerHTML = DOMPurify.sanitize(marked.parse(content || evt.reply || ""));
+        } else if (evt.kind === "error") {
+          aiBubble.classList.remove("cursor");
+          aiBubble.innerHTML = `<span class="error">❌ ${escapeHtml(evt.error)}</span>`;
+        }
+      }
+    }
+
+    // Agent 完成后，显示完成状态
+    if (finalized) {
+      const sugg = document.getElementById("create-suggestions");
+      sugg.style.display = "flex";
+      sugg.innerHTML = `
+        <button class="suggest-chip" onclick="closeTaskCreate()" style="background:#e6f4ea;color:#1e8e3e;justify-content:center;width:100%;">
+          ✓ 任务已创建，点击返回
+        </button>
+      `;
+    } else {
+      // 还没完成——恢复预设提示词让用户继续对话
+      const sugg = document.getElementById("create-suggestions");
+      sugg.style.display = "flex";
+      sugg.innerHTML = `
+        <button class="suggest-chip" onclick="fillTaskCreate('改成每天早上 8 点')">
+          ⏰ 改成每天早上 8 点
+        </button>
+      `;
+    }
+  } catch (e) {
+    aiBubble.classList.remove("cursor");
+    aiBubble.innerHTML = `<span class="error">❌ ${escapeHtml(e.message)}</span>`;
+  } finally {
+    createBusy = false;
+    sendBtn.disabled = false;
+    input.focus();
+  }
+}
 </script>
 
 

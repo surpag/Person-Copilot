@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 import base64
 import uuid as uuid_lib
-
+from typing import Any
+from pydantic import BaseModel, Field
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import asyncio
 import json
@@ -89,18 +90,26 @@ def _save_image_file(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("[api] 启动")
-
-    # ← 关键：启动时确保表结构就绪（触发所有 migration）
+    
     from session.schema import connect as schema_connect
-
+    from memory import init_tables as init_memory_tables
+    
     db = await schema_connect(DEFAULT_DB_PATH)
+    await init_memory_tables(db)
     await db.close()
     logger.info("[api] DB schema 已就绪")
-
+    
+    # ─── 启动调度器 ───
+    from tasks import scheduler as sched
+    sched.start()
+    await sched.load_all_tasks()
+    logger.info("[api] 调度器已就绪")
+    
     yield
+    
     logger.info("[api] 关闭，清理所有 Agent")
     await pool.close_all()
-
+    sched.shutdown()
 
 app = FastAPI(title="Agent API", version="0.1.0", lifespan=lifespan)
 # 挂载图片静态目录
@@ -115,6 +124,23 @@ async def index():
 
 
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+
+@app.get("/manifest.json")
+async def manifest():
+    return FileResponse(
+        _static_dir / "manifest.json",
+        media_type="application/manifest+json",
+    )
+
+
+@app.get("/sw.js")
+async def service_worker():
+    return FileResponse(
+        _static_dir / "sw.js",
+        media_type="application/javascript",
+    )
+
 
 # ============================================================
 # 健康检查
@@ -205,6 +231,18 @@ async def chat_stream(req: ChatRequest):
                 ttft_ms = (time.perf_counter() - started) * 1000
             if kind == "content":
                 partial_content["text"] += text
+            if kind == "tool_call":
+                # 工具调用事件：text 是 JSON 字符串
+                try:
+                    data = json.loads(text)
+                    queue.put_nowait({
+                        "kind": "tool_call",
+                        "name": data.get("name"),
+                        "success": data.get("success"),
+                    })
+                    return
+                except Exception:
+                    pass
             queue.put_nowait({"kind": kind, "text": text})
 
         old_on_token = agent.on_token
@@ -398,7 +436,27 @@ async def get_history(
 
 class CancelRequest(BaseModel):
     session_id: str
+class TaskCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    prompt: str = Field(min_length=1)
+    icon: str = "📋"
+    description: str = ""
+    category: str = "general"
+    tools: list[str] = Field(default_factory=list)
+    trigger_type: str = "manual"
+    schedule: str | None = None
 
+
+class TaskUpdateRequest(BaseModel):
+    name: str | None = None
+    prompt: str | None = None
+    icon: str | None = None
+    description: str | None = None
+    category: str | None = None
+    tools: list[str] | None = None
+    trigger_type: str | None = None
+    schedule: str | None = None
+    enabled: int | None = None
 
 @app.post("/chat/cancel", dependencies=[Depends(require_token)])
 async def cancel_chat(req: CancelRequest):
@@ -406,3 +464,340 @@ async def cancel_chat(req: CancelRequest):
     cancelled = pool.cancel_task(req.session_id)
     logger.info(f"[api] cancel session={req.session_id} result={cancelled}")
     return {"cancelled": cancelled, "session_id": req.session_id}
+
+
+@app.get("/memories", dependencies=[Depends(require_token)])
+async def list_memories():
+    """
+    列出所有记忆。
+    返回结构：{ scope: { category: [条目] } }
+      scope:    user / agent
+      category: profile/work/lifestyle/tools/goals/routine/character/tone/constraints
+    """
+    from memory import PreferencesStore, init_tables
+    from session.schema import connect as schema_connect
+
+    db = await schema_connect(DEFAULT_DB_PATH)
+    await init_tables(db)
+    try:
+        prefs = PreferencesStore(db)
+        grouped = await prefs.list_grouped()
+    finally:
+        await db.close()
+
+    return {"scopes": grouped}
+
+@app.delete("/memories/{mem_id}", dependencies=[Depends(require_token)])
+async def delete_memory(mem_id: int):
+    """删除一条偏好记忆。"""
+    from memory import PreferencesStore, init_tables
+    from session.schema import connect as schema_connect
+
+    db = await schema_connect(DEFAULT_DB_PATH)
+    await init_tables(db)
+    try:
+        prefs = PreferencesStore(db)
+        ok = await prefs.delete_by_id(mem_id)
+    finally:
+        await db.close()
+
+    if not ok:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"deleted": True, "id": mem_id}
+
+
+# ============================================================
+# 任务模板（Tasks）
+# ============================================================
+
+class TaskDraftRequest(BaseModel):
+    category: str = "general"
+
+
+@app.post("/tasks/draft", dependencies=[Depends(require_token)])
+async def create_task_draft(req: TaskDraftRequest):
+    """
+    预创建一个 draft 任务。
+    用于"点 + 新建任务"：前端拿到 task_id，跳到 task-{id} 会话，
+    用户在对话里讨论需求，Agent 逐步完善任务定义。
+    """
+    from memory import TasksStore, TaskRunsStore
+
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        task_id = await store.create_draft(category=req.category)
+    finally:
+        await db.close()
+
+    return {
+        "id": task_id,
+        "session_id": f"task-{task_id}",   # 前端直接用这个 session_id
+    }
+
+
+
+async def _open_memory_db():
+    """打开 DB 并初始化 memory 表。调用方负责 close。"""
+    from memory import init_tables
+    from session.schema import connect as schema_connect
+
+    db = await schema_connect(DEFAULT_DB_PATH)
+    await init_tables(db)
+    return db
+
+
+@app.get("/tasks", dependencies=[Depends(require_token)])
+async def list_tasks(
+    category: str | None = None,
+    trigger_type: str | None = None,
+    enabled_only: bool = False,
+    status: str = "active",          # ← 新增，默认只查 active
+):
+    """列出任务模板。status='all' 可查全部（含 draft）。"""
+    from memory import TasksStore
+
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        tasks = await store.list_all(
+            category=category,
+            trigger_type=trigger_type,
+            enabled_only=enabled_only,
+            status=status,
+        )
+    finally:
+        await db.close()
+    return {"tasks": tasks}
+
+@app.post("/tasks", dependencies=[Depends(require_token)])
+async def create_task(req: TaskCreateRequest):
+    """新建任务。"""
+    from memory import TasksStore
+
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        task_id = await store.create(
+            name=req.name,
+            prompt=req.prompt,
+            icon=req.icon,
+            description=req.description,
+            category=req.category,
+            tools=req.tools,
+            trigger_type=req.trigger_type,
+            schedule=req.schedule,
+        )
+    except ValueError as e:
+        await db.close()
+        raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        await db.close()
+        # 同步调度器
+    from tasks import scheduler as sched
+    if req.trigger_type == "scheduled":
+        # 拿最新任务记录（含 id）
+        db2 = await _open_memory_db()
+        try:
+            from memory import TasksStore
+            store2 = TasksStore(db2)
+            task = await store2.get(task_id)
+        finally:
+            await db2.close()
+        if task:
+            sched.register_task(task)
+    return {"id": task_id, "created": True}
+
+@app.get("/task-runs", dependencies=[Depends(require_token)])
+async def list_task_runs(days: int = 7):
+    """
+    任务执行记录，按天分组。
+    返回：{"grouped": {"today": [...], "yesterday": [...], "2026-10-10": [...]}}
+    """
+    from memory import TaskRunsStore
+
+    db = await _open_memory_db()
+    try:
+        store = TaskRunsStore(db)
+        grouped = await store.list_grouped_by_day(days=days)
+    finally:
+        await db.close()
+    return {"grouped": grouped}
+@app.patch("/tasks/{task_id}", dependencies=[Depends(require_token)])
+async def update_task(task_id: int, req: TaskUpdateRequest):
+    """更新任务（局部）。"""
+    from memory import TasksStore
+
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        fields = {k: v for k, v in req.model_dump().items() if v is not None}
+        try:
+            ok = await store.update(task_id, **fields)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    finally:
+        await db.close()
+
+    
+    if not ok:
+        raise HTTPException(status_code=404, detail="task not found or no changes")
+
+    # 同步调度器
+    from tasks import scheduler as sched
+    db2 = await _open_memory_db()
+    try:
+        from memory import TasksStore
+        store2 = TasksStore(db2)
+        task = await store2.get(task_id)
+    finally:
+        await db2.close()
+    if task:
+        sched.register_task(task)
+
+    return {"updated": True, "id": task_id}
+
+
+@app.delete("/tasks/{task_id}", dependencies=[Depends(require_token)])
+async def delete_task(task_id: int):
+    """删除任务。内置任务会被拒绝。"""
+    from memory import TasksStore
+
+    # 先取消调度
+    from tasks import scheduler as sched
+    sched.unregister_task(task_id)
+
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        ok, msg = await store.delete(task_id)
+    finally:
+        await db.close()
+
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"deleted": True, "id": task_id}
+
+@app.delete("/task-runs/{run_id}", dependencies=[Depends(require_token)])
+async def delete_task_run(run_id: int):
+    """删除单条执行记录。"""
+    db = await _open_memory_db()
+    try:
+        await db.execute("DELETE FROM task_runs WHERE id = ?", (run_id,))
+        await db.commit()
+    finally:
+        await db.close()
+    return {"deleted": True, "id": run_id}
+
+@app.post("/tasks/{task_id}/run", dependencies=[Depends(require_token)])
+async def run_task(task_id: int, session_id: str = "task-runner"):
+    """
+    执行任务：把 task.prompt 作为用户消息发给 Agent。
+    返回 SSE 流，和 /chat/stream 结构一致。
+    """
+    import uuid as uuid_lib
+    from memory import TasksStore, TaskRunsStore
+
+    # 1. 拿 task
+    db = await _open_memory_db()
+    try:
+        store = TasksStore(db)
+        task = await store.get(task_id)
+    finally:
+        await db.close()
+
+    if not task:
+        raise HTTPException(status_code=404, detail="task not found")
+    if not task["enabled"]:
+        raise HTTPException(status_code=400, detail="task disabled")
+
+    # 2. 每个任务一个固定会话：task-{id}
+    #    draft 阶段的讨论 + 历史执行都在这同一个会话里
+    run_session_id = f"task-{task_id}"
+    agent = await pool.get(run_session_id)
+    lock = pool.lock(run_session_id)
+
+    # 3. 创建执行记录（running）+ 更新任务元信息
+    from memory import TaskRunsStore
+
+    db2 = await _open_memory_db()
+    try:
+        runs_store = TaskRunsStore(db2)
+        tasks_store = TasksStore(db2)
+        run_id = await runs_store.start(task_id, session_id=run_session_id)
+        await tasks_store.mark_run(task_id)
+    finally:
+        await db2.close()
+
+    async def event_generator():
+        import json as json_lib
+        import time as time_lib
+        queue: asyncio.Queue = asyncio.Queue()
+        started = time_lib.perf_counter()
+
+        def on_token(text: str, kind: str) -> None:
+            queue.put_nowait({"kind": kind, "text": text})
+
+        old_on_token = agent.on_token
+        agent.on_token = on_token
+
+        async def run_chat():
+            success = False
+            reply_text = ""
+            error_text = None
+            try:
+                reply_text = await agent._chat(task["prompt"]) or ""
+                success = True
+                await queue.put({
+                    "kind": "done",
+                    "reply": reply_text,
+                    "elapsed_ms": round((time_lib.perf_counter() - started) * 1000),
+                })
+            except Exception as e:
+                error_text = f"{type(e).__name__}: {e}"
+                logger.exception("[tasks] run failed")
+                await queue.put({"kind": "error", "error": error_text})
+            finally:
+                # 写执行结果
+                duration_ms = round((time_lib.perf_counter() - started) * 1000)
+                try:
+                    db3 = await _open_memory_db()
+                    try:
+                        runs_store3 = TaskRunsStore(db3)
+                        await runs_store3.finish(
+                            run_id,
+                            success=success,
+                            output=reply_text,
+                            error=error_text,
+                            duration_ms=duration_ms,
+                        )
+                    finally:
+                        await db3.close()
+                except Exception as e:
+                    logger.error(f"[tasks] 写 task_runs 失败: {e}")
+                try:
+                    await queue.put(None)
+                except Exception:
+                    pass
+
+        try:
+            async with lock:
+                t = asyncio.create_task(run_chat())
+                pool.register_task(run_session_id, t)
+                try:
+                    while True:
+                        item = await queue.get()
+                        if item is None:
+                            break
+                        yield f"data: {json_lib.dumps(item, ensure_ascii=False)}\n\n"
+                    await t
+                finally:
+                    pool.clear_task(run_session_id)
+        finally:
+            agent.on_token = old_on_token
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

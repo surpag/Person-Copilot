@@ -31,6 +31,18 @@ def _get_notes():
 class SaveNoteArgs(BaseModel):
     title: str = Field(description="笔记标题，简洁的一句话（20 字内）")
     tags: list[str] = Field(default_factory=list, description="标签列表，可选")
+    category: str = Field(
+        default="lifestyle",
+        description=(
+            "笔记维度：lifestyle(生活)/work(工作)/goals(目标)/"
+            "tools(工具)/profile(身份)。"
+        ),
+    )
+    lifetime: str = Field(
+        default="long_term",
+        description="时效性：long_term / mid_term / transient",
+    )
+    
     content_ref: Literal["last_image", "last_message", "explicit"] = Field(
         description=(
             "正文来源，**必填**。三种取值：\n"
@@ -84,6 +96,8 @@ async def save_note(args: SaveNoteArgs) -> str:
             content=content,
             tags=args.tags or [],
             summary=args.summary,
+            category=args.category,
+            lifetime=args.lifetime,
         )
     except ValueError as e:
         return f"❌ 参数错误：{e}"

@@ -14,5 +14,6 @@ from .preferences import PreferencesStore
 from .schema import connect, init_tables
 from .todos import TodosStore
 from .notes import NotesStore
-
-__all__ = ["connect", "init_tables", "PreferencesStore", "TodosStore", "NotesStore"]
+from .tasks import TasksStore
+from .task_runs import TaskRunsStore
+__all__ = ["connect", "init_tables", "PreferencesStore", "TodosStore", "NotesStore", "TasksStore","TaskRunsStore", ]

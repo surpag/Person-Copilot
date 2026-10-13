@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#007aff"/>
+  <circle cx="256" cy="210" r="80" fill="#ffffff"/>
+  <circle cx="230" cy="195" r="12" fill="#007aff"/>
+  <circle cx="282" cy="195" r="12" fill="#007aff"/>
+  <path d="M 220 235 Q 256 270 292 235" stroke="#007aff" stroke-width="14" fill="none" stroke-linecap="round"/>
+  <text x="256" y="420" font-size="72" text-anchor="middle" fill="#ffffff" font-family="sans-serif" font-weight="bold">AGENT</text>
+</svg>

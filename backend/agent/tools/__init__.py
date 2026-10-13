@@ -19,7 +19,7 @@ from . import memory_tools  # noqa: F401  —— 偏好、待办
 from . import note_tools  # 笔记
 from . import web_search
 from . import fetch_url
-
+from . import task_tools  
 __all__ = [
     "ToolEntry",
     "get_tool_definitions",
